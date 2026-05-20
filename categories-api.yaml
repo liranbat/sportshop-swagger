@@ -2,12 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Categories API
-  description: |
-    Read-only API surface for the user-facing categories carousel on the home page.
-
-    Admin write paths (create / edit / soft-delete / restore) will land in a
-    future revision of this contract together with the admin Category Management
-    screen. Until then this file stays minimal -- only what the home page needs.
+  description: Read-only categories surface for the home page carousel.
   version: 0.1.0
 
 servers:
@@ -16,7 +11,7 @@ servers:
 
 tags:
   - name: Categories
-    description: Product categories surfaced on the home page
+    description: Home-page product categories
 
 paths:
   /api/categories/active:
@@ -24,15 +19,10 @@ paths:
       operationId: listActiveCategories
       tags: [Categories]
       summary: List active categories
-      description: |
-        Returns every category whose `is_deleted = FALSE`, ordered alphabetically
-        by name. Public endpoint -- no authentication required.
-
-        A future admin endpoint at `/api/admin/categories` will surface the full
-        set (including soft-deleted rows) for the Category Management screen.
+      description: Returns every category with `is_deleted = FALSE`, ordered alphabetically by name. Public endpoint.
       responses:
         "200":
-          description: List of active categories (may be empty)
+          description: List of active categories (may be empty).
           content:
             application/json:
               schema:
@@ -49,23 +39,15 @@ components:
         id:
           type: integer
           format: int64
-          description: Stable numeric identifier
           example: 1
         name:
           type: string
           minLength: 1
           maxLength: 100
-          description: Display name shown on the category card
           example: Soccer
         icon:
           type: string
           maxLength: 500
           nullable: true
-          description: |
-            Relative URL of the category icon, rooted at the configured
-            images URL prefix (e.g. `/images/categories/soccer.svg`).
-            Composed by the backend from `app.images.url-prefix` and the
-            relative path stored in the database. The browser resolves
-            this against its current origin. `null` when no icon has been
-            uploaded yet; the frontend renders a placeholder in that case.
+          description: Relative URL of the category icon (e.g. `/images/categories/soccer.svg`); `null` if no icon uploaded.
           example: /images/categories/soccer.svg
