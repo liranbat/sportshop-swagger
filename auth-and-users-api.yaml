@@ -1,0 +1,316 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Auth & Users API
+  description: Authentication endpoints (sign up, sign in, sign out, refresh, /me) plus self-service profile endpoints (edit, change password, soft-delete own account).
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Sign up, sign in, sign out, refresh, /me
+  - name: Users
+    description: Self-service profile endpoints
+
+paths:
+  /api/auth/register:
+    post:
+      operationId: register
+      tags: [Auth]
+      summary: Register a new user
+      description: Creates a new active user with a bcrypt-hashed password. Does NOT auto sign in -- no cookies issued.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Sign in with email + password
+      description: Verifies the bcrypt hash, upserts the single refresh-token row, and sets both session cookies.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Signed in.
+          headers:
+            Set-Cookie:
+              description: Sets `access_token` and `refresh_token` cookies (HttpOnly Secure SameSite=Lax).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Sign out the current session
+      description: Clears both cookies (`Max-Age=0`) and deletes the matching refresh-token row. Idempotent.
+      security: []
+      responses:
+        "204":
+          description: Session cleared.
+          headers:
+            Set-Cookie:
+              description: Both cookies sent with `Max-Age=0`.
+              schema:
+                type: string
+
+  /api/auth/refresh:
+    post:
+      operationId: refresh
+      tags: [Auth]
+      summary: Rotate session cookies
+      description: Validates the refresh token, issues a new access cookie, rotates the refresh cookie, and returns the current user.
+      security:
+        - refreshCookieAuth: []
+      responses:
+        "200":
+          description: Refreshed.
+          headers:
+            Set-Cookie:
+              description: New `access_token` and rotated `refresh_token` cookies (HttpOnly Secure SameSite=Lax).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/auth/me:
+    get:
+      operationId: getMe
+      tags: [Auth]
+      summary: Current user
+      description: Drives the Navbar variant and the Profile page.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/users/me:
+    patch:
+      operationId: updateProfile
+      tags: [Users]
+      summary: Update caller's profile
+      description: Updates `firstName`, `lastName`, `phone`. `email` is immutable. Returns the updated user.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+    delete:
+      operationId: deleteAccount
+      tags: [Users]
+      summary: Soft-delete caller's account
+      description: Re-auth via `X-Confirm-Password` header (verified against the bcrypt hash before any mutation). Soft-deletes the user, hard-deletes refresh tokens and cart items, clears both cookies. Orders are preserved; email stays reserved. Server must keep this header out of access logs.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: X-Confirm-Password
+          in: header
+          required: true
+          description: Caller's current password. Never logged.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "204":
+          description: Account soft-deleted.
+          headers:
+            Set-Cookie:
+              description: Both cookies sent with `Max-Age=0`.
+              schema:
+                type: string
+
+  /api/users/me/password:
+    post:
+      operationId: changePassword
+      tags: [Users]
+      summary: Change caller's password
+      description: Verifies current password, rewrites the bcrypt hash. Session cookies unchanged (single-session invariant).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: Password updated.
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
+    refreshCookieAuth:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: HttpOnly Secure SameSite=Lax opaque token. Only `/auth/refresh` consumes it.
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [firstName, lastName, email, phone, password]
+      properties:
+        firstName:
+          type: string
+          minLength: 2
+          maxLength: 50
+          pattern: '^[A-Za-z]+(-[A-Za-z]+)*$'
+          description: Latin letters; internal hyphen allowed, no leading/trailing/consecutive hyphens.
+          example: Liran
+        lastName:
+          type: string
+          minLength: 2
+          maxLength: 50
+          pattern: '^[A-Za-z]+(-[A-Za-z]+)*$'
+          description: Same rules as `firstName`.
+          example: Bat
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          example: liran@example.com
+        phone:
+          type: string
+          pattern: '^05\d{8}$'
+          description: Israeli mobile, normalized `05XXXXXXXX`.
+          example: "0521234567"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 30
+          pattern: '^(?=.*[A-Za-z])(?=.*\d)(?!.*\s).+$'
+          description: 8-30 chars, at least one letter, one digit, no whitespace. Hashed server-side with bcrypt.
+          example: Password1
+          writeOnly: true
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: liran@example.com
+        password:
+          type: string
+          description: Compared against the stored bcrypt hash. No client-side policy check.
+          example: Password1
+          writeOnly: true
+
+    UpdateProfileRequest:
+      type: object
+      required: [firstName, lastName, phone]
+      properties:
+        firstName:
+          type: string
+          minLength: 2
+          maxLength: 50
+          pattern: '^[A-Za-z]+(-[A-Za-z]+)*$'
+          description: Latin letters; internal hyphen allowed, no leading/trailing/consecutive hyphens.
+          example: Liran
+        lastName:
+          type: string
+          minLength: 2
+          maxLength: 50
+          pattern: '^[A-Za-z]+(-[A-Za-z]+)*$'
+          description: Same rules as `firstName`.
+          example: Bat
+        phone:
+          type: string
+          pattern: '^05\d{8}$'
+          description: Israeli mobile, normalized `05XXXXXXXX`.
+          example: "0521234567"
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          description: Verified against the current bcrypt hash. No client-side policy check.
+          example: OldPassword1
+          writeOnly: true
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 30
+          pattern: '^(?=.*[A-Za-z])(?=.*\d)(?!.*\s).+$'
+          description: 8-30 chars, at least one letter, one digit, no whitespace. Hashed server-side with bcrypt.
+          example: NewPassword1
+          writeOnly: true
+
+    UserResponse:
+      type: object
+      description: Shared user payload returned by register/login/refresh/getMe/updateProfile.
+      required: [id, firstName, lastName, email, phone, isAdmin]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        firstName:
+          type: string
+          example: Liran
+        lastName:
+          type: string
+          example: Bat
+        email:
+          type: string
+          format: email
+          example: liran@example.com
+        phone:
+          type: string
+          pattern: '^05\d{8}$'
+          example: "0521234567"
+        isAdmin:
+          type: boolean
+          description: Drives LoggedIn vs LoggedInAdmin Navbar variant and admin-route guards.
+          example: false
