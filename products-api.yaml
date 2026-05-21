@@ -1,0 +1,141 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Products API
+  description: Read-only products surface for the catalog page.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Products
+    description: Catalog products
+
+paths:
+  /api/products:
+    get:
+      operationId: listProducts
+      tags: [Products]
+      summary: List products
+      description: Returns the filtered and sorted list of products. All filter and sort query parameters are optional and combine with AND semantics.
+      parameters:
+        - name: active
+          in: query
+          required: false
+          description: |
+            `true` returns non-archived rows only, `false` returns archived only,
+            omitted returns every row.
+          schema:
+            type: boolean
+          example: true
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive substring match on `name`. Whitespace-trimmed server-side; empty after trim is treated as no filter.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          example: spalding
+        - name: categoryIds
+          in: query
+          required: false
+          description: Filter to products whose `categoryId` is in the set. Serialized as comma-joined values (`?categoryIds=1,2,3`).
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+              format: int64
+          example: [1, 2]
+        - name: priceMin
+          in: query
+          required: false
+          description: Returns products with `price >= priceMin`.
+          schema:
+            type: number
+            minimum: 0
+          example: 10.00
+        - name: priceMax
+          in: query
+          required: false
+          description: Returns products with `price <= priceMax`. If `priceMax < priceMin`, the request succeeds and returns an empty list.
+          schema:
+            type: number
+            minimum: 0
+          example: 100.00
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted or empty, the backend sorts by `id` ascending (stable insertion order).
+          schema:
+            type: string
+            enum: [name, price, category]
+          example: name
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Ignored unless `sortField` is supplied. Defaults to `asc`.
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: asc
+      responses:
+        "200":
+          description: List of products matching the filter (may be empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+components:
+  schemas:
+    Product:
+      type: object
+      required: [id, name, categoryId, isMultiSize, price, version]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Marketing copy for the product detail page; `null` if not authored yet.
+          example: Official-size indoor/outdoor basketball with composite leather grip.
+        categoryId:
+          type: integer
+          format: int64
+          description: Foreign key to `Category.id`.
+          example: 1
+        isMultiSize:
+          type: boolean
+          description: When `true`, the product ships in multiple size variants (e.g. shoes); when `false`, it is a single-size SKU (balls, accessories).
+          example: false
+        imageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Server-composed relative URL of the product image (e.g. `/images/products/basketball-spalding.jpg`); `null` if no image uploaded.
+          example: /images/products/basketball-spalding.jpg
+        price:
+          type: number
+          minimum: 0
+          description: Price in the store's base currency, with two decimal places.
+          example: 29.99
+        version:
+          type: integer
+          format: int32
+          description: Optimistic-locking stamp; bumped on every successful update.
+          example: 1

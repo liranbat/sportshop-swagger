@@ -14,15 +14,25 @@ tags:
     description: Home-page product categories
 
 paths:
-  /api/categories/active:
+  /api/categories:
     get:
-      operationId: listActiveCategories
+      operationId: listCategories
       tags: [Categories]
-      summary: List active categories
-      description: Returns every category with `is_deleted = FALSE`, ordered alphabetically by name. Public endpoint.
+      summary: List categories
+      description: Returns categories ordered alphabetically by name. Filter with `active` to scope the result set.
+      parameters:
+        - name: active
+          in: query
+          required: false
+          description: |
+            `true` returns non-deleted rows only, `false` returns soft-deleted only,
+            omitted returns every row.
+          schema:
+            type: boolean
+          example: true
       responses:
         "200":
-          description: List of active categories (may be empty).
+          description: List of categories matching the filter (may be empty).
           content:
             application/json:
               schema:
