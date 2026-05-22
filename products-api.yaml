@@ -102,7 +102,7 @@ paths:
           in: query
           required: false
           description: |
-            Items per page. The UI exposes `[2, 4, 9, 16, 25]`; any positive integer is accepted
+            Items per page. The UI exposes `[4, 9, 16, 25]`; any positive integer is accepted
             for API parity. The controller defaults the value when omitted.
           schema:
             type: integer
