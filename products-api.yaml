@@ -2,8 +2,8 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Products API
-  description: Read-only products surface for the catalog page.
-  version: 0.2.0
+  description: Read-only products surface for the catalog page and product details page.
+  version: 0.3.0
 
 servers:
   - url: http://localhost:8080
@@ -117,11 +117,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductPage"
 
+  /api/products/{id}:
+    get:
+      operationId: getProduct
+      tags: [Products]
+      summary: Get product details
+      description: |
+        Returns the full product detail payload used by the Product Details page:
+        the base `Product` fields, the resolved `categoryName`, and a `sizes`
+        array describing the product's stock for each size (with a server-computed
+        `state` of `IN_STOCK`, `LOW_STOCK`, or `OUT_OF_STOCK`).
+
+        Single-size SKUs (`isMultiSize = false`) return exactly one entry whose
+        `size` is `ONE_SIZE`. Multi-size SKUs return one entry per stocked size.
+
+        Returns `404` when the product does not exist or has been archived
+        (`is_archived = true`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Product identifier (matches `Product.id`).
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: Product detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
 components:
   schemas:
     Product:
       type: object
-      required: [id, name, categoryId, isMultiSize, price, version]
+      required: [id, name, isMultiSize, price, version]
       properties:
         id:
           type: integer
@@ -163,6 +197,53 @@ components:
           format: int32
           description: Optimistic-locking stamp; bumped on every successful update.
           example: 1
+    ProductDetail:
+      description: |
+        Aggregated payload for the Product Details page. Wraps a `Product` with
+        the resolved `categoryName` (saves the frontend a second call to
+        `/api/categories`) and the per-size stock breakdown.
+      allOf:
+        - $ref: "#/components/schemas/Product"
+        - type: object
+          properties:
+            categoryName:
+              type: string
+              minLength: 1
+              maxLength: 100
+              description: Display name of the category referenced by `categoryId`.
+              example: Basketball Balls
+            sizes:
+              type: array
+              description: Single-size SKUs return one row with `size = "ONE_SIZE"`; multi-size SKUs return one row per stocked size.
+              items:
+                $ref: "#/components/schemas/ProductSize"
+    ProductSize:
+      type: object
+      description: A single size variant's stock snapshot for a product.
+      required: [size, quantity, state]
+      properties:
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Size token (e.g. `"ONE_SIZE"`, `"42"`, `"L"`).
+          example: ONE_SIZE
+        quantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Current on-hand quantity for this size.
+          example: 25
+        state:
+          type: string
+          description: |
+            Server-computed stock state derived from `quantity` and the
+            product's `low_stock_threshold`:
+              * `OUT_OF_STOCK` when `quantity == 0`.
+              * `LOW_STOCK`    when `0 < quantity <= low_stock_threshold`.
+              * `IN_STOCK`     otherwise.
+          enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK]
+          example: IN_STOCK
     ProductPage:
       type: object
       description: Paged envelope returned by `GET /api/products`. `page` and `pageSize` echo the request; `totalElements` and `totalPages` describe the full filtered set.
