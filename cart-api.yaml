@@ -1,0 +1,402 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Cart API
+  description: Cart surface for the Cart page and validation flows. Lines identified by composite `(productId, size)`; user identity is the authenticated principal.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Cart
+    description: Cart read, sync, validation, and item mutations
+
+security:
+  - cookieAuth: []
+
+paths:
+  /api/cart/count:
+    get:
+      operationId: getCartCount
+      tags: [Cart]
+      summary: Get cart item count
+      description: Lightweight read used by the Navbar Cart badge.
+      responses:
+        "200":
+          description: Current item count for the caller's cart (may be `0`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartCount"
+
+  /api/cart/sync:
+    post:
+      operationId: syncCart
+      tags: [Cart]
+      summary: Silently reconcile and return the cart
+      description: Bumps every line's `productVersionInCart` to the current `products.version` and returns the full `CartView`. Used by Cart page mount, the sync button, and the modal's "Update Cart" action.
+      responses:
+        "200":
+          description: Cart after silent sync (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartView"
+
+  /api/cart/validate:
+    post:
+      operationId: validateCart
+      tags: [Cart]
+      summary: Validate the cart for checkout
+      description: |
+        Comprehensive read-only conflict report covering every user-visible checkout-blocking
+        case: version drift (price / name / image / description / category / threshold bumps),
+        archive, insufficient stock, out of stock, size removed, and `is_multi_size` flipped.
+        Does NOT mutate -- the user sees what changed in the Cart Issues Modal and
+        acknowledges via `POST /api/cart/sync` ("Update Cart").
+      responses:
+        "200":
+          description: Validation result; `ok` is `true` iff both issue arrays are empty.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartValidationResult"
+
+  /api/cart/items:
+    post:
+      operationId: addCartItem
+      tags: [Cart]
+      summary: Add a product / size to the cart
+      description: |
+        Upserts on `(userId, productId, size)`. Quantity is **additive**; server caps via
+        `LEAST(existing + requested, availableStock)` and sets `productVersionInCart` to
+        current. Does NOT return the cart -- the Navbar badge updates via a `GET /api/cart/count`
+        refetch; full row state is fetched on the next page load / refresh button click.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddCartItemRequest"
+      responses:
+        "204":
+          description: Line added (or merged into an existing line).
+
+  /api/cart/items/{productId}/{size}:
+    patch:
+      operationId: updateCartItem
+      tags: [Cart]
+      summary: Change a cart line's quantity
+      description: |
+        Sets the line's quantity to `quantity` (not additive). Touches `quantity` ONLY --
+        does not refresh row details (name / price / image / stock / version) and does not
+        return the cart. The frontend optimistically applies the new quantity to its cached
+        line; refreshed product data flows through `POST /api/cart/sync` (page load /
+        refresh button) and `POST /api/cart/validate` (checkout).
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+        - $ref: "#/components/parameters/SizePath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCartItemRequest"
+      responses:
+        "204":
+          description: Quantity updated.
+
+    delete:
+      operationId: removeCartItem
+      tags: [Cart]
+      summary: Remove a cart line
+      description: |
+        Idempotent -- returns 204 even if the line was already gone (two-tab DELETE,
+        duplicate click). Does not return the cart; the frontend removes the row from its
+        cached cart and recomputes the count locally.
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+        - $ref: "#/components/parameters/SizePath"
+      responses:
+        "204":
+          description: Line removed (or no-op if it was already gone).
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
+
+  parameters:
+    ProductIdPath:
+      name: productId
+      in: path
+      required: true
+      description: Product identifier (matches `Product.id`).
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+      example: 1
+    SizePath:
+      name: size
+      in: path
+      required: true
+      description: Size token (e.g. `"ONE_SIZE"`, `"42"`, `"L"`).
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 20
+      example: ONE_SIZE
+
+  schemas:
+    StockIssueKind:
+      type: string
+      description: |
+        Why a cart line is blocking checkout from a stock perspective:
+          * `OUT_OF_STOCK`       -- `availableStock = 0` (also covers size-removed and `is_multi_size`-flip cases).
+          * `INSUFFICIENT_STOCK` -- `0 < availableStock < quantity`.
+      enum: [OUT_OF_STOCK, INSUFFICIENT_STOCK]
+      example: INSUFFICIENT_STOCK
+
+    CartCount:
+      type: object
+      description: Navbar badge payload.
+      required: [itemCount]
+      properties:
+        itemCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of distinct cart lines for the caller.
+          example: 3
+
+    CartItem:
+      type: object
+      description: One cart line. Identity is the composite `(productId, size)` -- no surrogate id.
+      required:
+        - productId
+        - size
+        - quantity
+        - productName
+        - productPrice
+        - productIsArchived
+        - productVersionInCart
+        - productVersionCurrent
+        - availableStock
+        - lineTotal
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: ONE_SIZE
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Currently stored quantity for this line.
+          example: 2
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        productImageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Live `products.image_url`; `null` if no image.
+          example: /images/products/basketball-spalding.jpg
+        productPrice:
+          type: number
+          minimum: 0
+          description: Live `products.price`.
+          example: 29.99
+        productCategoryName:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Live `categories.name`; `null` if the category was deleted out from under the product.
+          example: Basketball Balls
+        productIsArchived:
+          type: boolean
+          description: When `true`, the row renders UNAVAILABLE and is excluded from `subtotal`.
+          example: false
+        productVersionInCart:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Snapshot of `products.version` taken on add / last sync. Compared by `validate`.
+          example: 1
+        productVersionCurrent:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Live `products.version` at read time.
+          example: 1
+        availableStock:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Live `product_stock.quantity`. Coerced to `0` for size-removed / `is_multi_size`-flipped / hard-deleted defensive cases.
+          example: 25
+        lowStockThreshold:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: Live `products.low_stock_threshold`; drives the LOW_STOCK informational row state.
+          example: 5
+        lineTotal:
+          type: number
+          minimum: 0
+          description: "`productPrice * quantity`. Excluded from `subtotal` when the row is archived / out of stock."
+          example: 59.98
+
+    CartView:
+      type: object
+      description: Full cart payload. `subtotal` excludes non-purchasable lines (archived, out of stock).
+      required: [items, itemCount, subtotal]
+      properties:
+        items:
+          type: array
+          description: Cart lines, ordered by `(productId, size)` for stable render. May be empty.
+          items:
+            $ref: "#/components/schemas/CartItem"
+        itemCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Matches `items.length`.
+          example: 3
+        subtotal:
+          type: number
+          minimum: 0
+          description: Sum of `lineTotal` across purchasable lines. No tax or shipping, so also the cart total.
+          example: 89.97
+
+    VersionMismatch:
+      type: object
+      description: A cart line whose product version drifted since the user last acknowledged (or which has been archived).
+      required: [productId, productName, size, productIsArchived]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: ONE_SIZE
+        productIsArchived:
+          type: boolean
+          description: Tells the modal to use "no longer available" copy.
+          example: false
+
+    StockIssue:
+      type: object
+      description: A cart line whose stored quantity is no longer satisfiable from live stock.
+      required: [productId, productName, size, kind, availableStock, requestedQuantity]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: ONE_SIZE
+        kind:
+          $ref: "#/components/schemas/StockIssueKind"
+        availableStock:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Live `product_stock.quantity` (or `0` for the defensive cases). Drives "Only N available" copy.
+          example: 2
+        requestedQuantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The cart line's stored quantity (what the user wanted).
+          example: 5
+
+    CartValidationResult:
+      type: object
+      description: Read-only validation report. `cart` is the same shape the page renders so the client can `setQueryData` in one shot.
+      required: [ok, versionMismatches, stockIssues, cart]
+      properties:
+        ok:
+          type: boolean
+          description: Derivable as `versionMismatches.length === 0 && stockIssues.length === 0`.
+          example: true
+        versionMismatches:
+          type: array
+          description: Lines whose product version drifted (price / name / image / description / category / threshold bump) or whose product has been archived.
+          items:
+            $ref: "#/components/schemas/VersionMismatch"
+        stockIssues:
+          type: array
+          description: Lines whose stored quantity is no longer satisfiable. Genuine stock drops, size-removed, and `is_multi_size`-flip cases all surface here.
+          items:
+            $ref: "#/components/schemas/StockIssue"
+        cart:
+          $ref: "#/components/schemas/CartView"
+
+    AddCartItemRequest:
+      type: object
+      description: Body for `POST /api/cart/items`. `quantity` is additive against any existing `(userId, productId, size)` line.
+      required: [productId, size, quantity]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: ONE_SIZE
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Quantity to add. No client-side max-cap; server caps via `LEAST(existing + requested, availableStock)`.
+          example: 2
+
+    UpdateCartItemRequest:
+      type: object
+      description: Body for `PATCH /api/cart/items/{productId}/{size}`. Sets quantity to the given value (not additive).
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: New quantity for the line. `0` is rejected with `400 BAD_REQUEST` (use DELETE).
+          example: 3
