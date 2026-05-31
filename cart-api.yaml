@@ -230,7 +230,7 @@ components:
           example: Basketball Balls
         productIsArchived:
           type: boolean
-          description: When `true`, the row renders UNAVAILABLE and is excluded from `subtotal`.
+          description: When `true`, the row renders UNAVAILABLE. Still included in `subtotal`.
           example: false
         productVersionInCart:
           type: integer
@@ -260,12 +260,12 @@ components:
         lineTotal:
           type: number
           minimum: 0
-          description: "`productPrice * quantity`. Excluded from `subtotal` when the row is archived / out of stock."
+          description: "`productPrice * quantity`. Always contributes to `subtotal`."
           example: 59.98
 
     CartView:
       type: object
-      description: Full cart payload. `subtotal` excludes non-purchasable lines (archived, out of stock).
+      description: Full cart payload. `subtotal` sums every line (including archived / out of stock) -- matches what the user sees on screen.
       required: [items, itemCount, subtotal]
       properties:
         items:
@@ -282,7 +282,7 @@ components:
         subtotal:
           type: number
           minimum: 0
-          description: Sum of `lineTotal` across purchasable lines. No tax or shipping, so also the cart total.
+          description: Sum of `lineTotal` across all lines. No tax or shipping.
           example: 89.97
 
     VersionMismatch:
