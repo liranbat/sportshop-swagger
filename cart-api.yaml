@@ -17,6 +17,20 @@ security:
   - cookieAuth: []
 
 paths:
+  /api/cart:
+    get:
+      operationId: getCart
+      tags: [Cart]
+      summary: Read the cart (no version bump)
+      description: Returns the caller's cart with live product fields (`availableStock`, `productPrice`, `productIsArchived`, ...). Does not modify `productVersionInCart`.
+      responses:
+        "200":
+          description: Current cart (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CartView"
+
   /api/cart/count:
     get:
       operationId: getCartCount
@@ -35,11 +49,11 @@ paths:
     post:
       operationId: syncCart
       tags: [Cart]
-      summary: Silently reconcile and return the cart
-      description: Bumps every line's `productVersionInCart` to the current `products.version` and returns the full `CartView`. Used by Cart page mount, the sync button, and the modal's "Update Cart" action.
+      summary: Acknowledge product updates and return the cart
+      description: Bumps every line's `productVersionInCart` to the current `products.version` and returns the full `CartView`. User-driven only -- triggered by the Refresh button on the cart header and the modal's "Update Cart" action. Passive reads (page mount, post-mutation refetches) use `GET /api/cart` instead.
       responses:
         "200":
-          description: Cart after silent sync (may be empty).
+          description: Cart after version acknowledgment (may be empty).
           content:
             application/json:
               schema:
@@ -92,9 +106,9 @@ paths:
       description: |
         Sets the line's quantity to `quantity` (not additive). Touches `quantity` ONLY --
         does not refresh row details (name / price / image / stock / version) and does not
-        return the cart. The frontend optimistically applies the new quantity to its cached
-        line; refreshed product data flows through `POST /api/cart/sync` (page load /
-        refresh button) and `POST /api/cart/validate` (checkout).
+        return the cart. The frontend refetches via `GET /api/cart` to pick up fresh row
+        state without re-acknowledging product versions; `POST /api/cart/sync` (refresh
+        button) and `POST /api/cart/validate` (checkout) remain the explicit version paths.
       parameters:
         - $ref: "#/components/parameters/ProductIdPath"
         - $ref: "#/components/parameters/SizePath"
