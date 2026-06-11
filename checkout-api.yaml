@@ -1,0 +1,195 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Checkout API
+  description: Checkout API. `POST /api/checkout` runs the atomic cart-to-order transaction and returns a `CheckoutResult` envelope.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Checkout
+    description: Cart-to-order conversion
+
+security:
+  - cookieAuth: []
+
+paths:
+  /api/checkout:
+    post:
+      operationId: checkout
+      tags: [Checkout]
+      summary: Convert the caller's cart into an order
+      description: |
+        Runs the atomic checkout transaction: re-runs the pre-flight cart validation, deducts
+        stock, persists the `orders` / `order_items` / `payments` rows, clears the cart, and
+        returns a `CheckoutResult` envelope. Business failures return `200` with `success=false`
+        and a `failureMessage`. Non-business failures (empty cart, order-number exhaustion,
+        unauthenticated, unexpected) return the global `ApiError` shape.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutRequest"
+      responses:
+        "200":
+          description: Checkout outcome. `success=true` carries `orderNumber` / `itemCount` / `totalPrice`; `success=false` carries `failureCause` / `failureMessage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResult"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
+
+  schemas:
+    ShippingDetails:
+      type: object
+      description: Shipping address for the order.
+      required:
+        - fullName
+        - email
+        - phone
+        - country
+        - city
+        - addressLine
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: "^[A-Za-z]+(?:[-\\s][A-Za-z]+)*$"
+          description: 2-100 letters (a-z); `-` or single space allowed only between letters.
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+          example: jane.doe@example.com
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 10
+          pattern: "^05\\d{8}$"
+          description: 10-digit Israeli mobile number, must start with `05`.
+          example: "0521234567"
+        country:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Israel
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Tel Aviv
+        addressLine:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: 12 Allenby St, Apt 4
+
+    PaymentDetails:
+      type: object
+      description: Mock payment details for the checkout.
+      required:
+        - cardNumber
+        - expiry
+        - cvv
+        - nameOnCard
+      properties:
+        cardNumber:
+          type: string
+          minLength: 13
+          maxLength: 19
+          pattern: "^\\d{13,19}$"
+          writeOnly: true
+          description: 13-19 digits, no spaces.
+          example: "4242424242424242"
+        expiry:
+          type: string
+          minLength: 5
+          maxLength: 5
+          pattern: "^(0[1-9]|1[0-2])/\\d{2}$"
+          writeOnly: true
+          description: "`MM/YY` (month / 2-digit year)."
+          example: "12/30"
+        cvv:
+          type: string
+          minLength: 3
+          maxLength: 4
+          pattern: "^\\d{3,4}$"
+          writeOnly: true
+          description: 3 or 4 digits.
+          example: "123"
+        nameOnCard:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: "^[A-Za-z]+(?:[-\\s][A-Za-z]+)*$"
+          writeOnly: true
+          description: Cardholder name.
+          example: Jane Doe
+
+    CheckoutRequest:
+      type: object
+      description: Body for `POST /api/checkout`.
+      required: [shipping, payment]
+      properties:
+        shipping:
+          $ref: "#/components/schemas/ShippingDetails"
+        payment:
+          $ref: "#/components/schemas/PaymentDetails"
+
+    CheckoutResult:
+      type: object
+      description: Outcome envelope for `POST /api/checkout`.
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          description: "`true` iff the checkout committed."
+          example: true
+        orderNumber:
+          type: string
+          minLength: 23
+          maxLength: 23
+          pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
+          nullable: true
+          description: Present only when `success=true`. 23-char format `ORD-YYYYMMDD-XXXXXXXXXX`.
+          example: ORD-20260611-A1B2C3D4E5
+        itemCount:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          description: Present only when `success=true`. Number of distinct lines in the order.
+          example: 3
+        totalPrice:
+          type: number
+          minimum: 0
+          nullable: true
+          description: Present only when `success=true`. Sum of `order_items.line_total`.
+          example: 89.97
+        failureCause:
+          type: string
+          minLength: 1
+          maxLength: 64
+          nullable: true
+          description: Present only when `success=false`. Failure category code.
+        failureMessage:
+          type: string
+          minLength: 1
+          maxLength: 500
+          nullable: true
+          description: Present only when `success=false`. Server-supplied user-facing error string.
+          example: "Your payment couldn't be processed. Please try again or use a different card."
