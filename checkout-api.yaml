@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Checkout API
-  description: Checkout API. `POST /api/checkout` runs the atomic cart-to-order transaction and returns a `CheckoutResult` envelope.
+  description: Checkout API. `POST /api/checkout` runs the atomic cart-to-order transaction.
   version: 0.1.0
 
 servers:
@@ -24,10 +24,9 @@ paths:
       summary: Convert the caller's cart into an order
       description: |
         Runs the atomic checkout transaction: re-runs the pre-flight cart validation, deducts
-        stock, persists the `orders` / `order_items` / `payments` rows, clears the cart, and
-        returns a `CheckoutResult` envelope. Business failures return `200` with `success=false`
-        and a `failureMessage`. Non-business failures (empty cart, order-number exhaustion,
-        unauthenticated, unexpected) return the global `ApiError` shape.
+        stock, persists the `orders` / `order_items` / `payments` rows, and clears the cart.
+        Returns `CheckoutResult` on success. Any failure surfaces as the global `ApiError`
+        envelope with the appropriate HTTP status.
       requestBody:
         required: true
         content:
@@ -36,7 +35,7 @@ paths:
               $ref: "#/components/schemas/CheckoutRequest"
       responses:
         "200":
-          description: Checkout outcome. `success=true` carries `orderNumber` / `itemCount` / `totalPrice`; `success=false` carries `failureCause` / `failureMessage`.
+          description: Order committed.
           content:
             application/json:
               schema:
@@ -152,44 +151,24 @@ components:
 
     CheckoutResult:
       type: object
-      description: Outcome envelope for `POST /api/checkout`.
-      required: [success]
+      description: Committed order summary returned by `POST /api/checkout`.
+      required: [orderNumber, itemCount, totalPrice]
       properties:
-        success:
-          type: boolean
-          description: "`true` iff the checkout committed."
-          example: true
         orderNumber:
           type: string
           minLength: 23
           maxLength: 23
           pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
-          nullable: true
-          description: Present only when `success=true`. 23-char format `ORD-YYYYMMDD-XXXXXXXXXX`.
+          description: 23-char format `ORD-YYYYMMDD-XXXXXXXXXX`.
           example: ORD-20260611-A1B2C3D4E5
         itemCount:
           type: integer
           format: int32
           minimum: 1
-          nullable: true
-          description: Present only when `success=true`. Number of distinct lines in the order.
+          description: Number of distinct lines in the order.
           example: 3
         totalPrice:
           type: number
           minimum: 0
-          nullable: true
-          description: Present only when `success=true`. Sum of `order_items.line_total`.
+          description: Sum of `order_items.line_total`.
           example: 89.97
-        failureCause:
-          type: string
-          minLength: 1
-          maxLength: 64
-          nullable: true
-          description: Present only when `success=false`. Failure category code.
-        failureMessage:
-          type: string
-          minLength: 1
-          maxLength: 500
-          nullable: true
-          description: Present only when `success=false`. Server-supplied user-facing error string.
-          example: "Your payment couldn't be processed. Please try again or use a different card."
