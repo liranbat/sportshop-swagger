@@ -1,0 +1,452 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Orders API
+  description: Read the caller's order history, read a single order's detail, and cancel a PAID order. Every endpoint is scoped to the authenticated caller; non-owner reads return `404`.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Orders
+    description: Order history, order detail, user-initiated cancellation.
+
+security:
+  - cookieAuth: []
+
+paths:
+  /api/orders:
+    get:
+      operationId: listOrders
+      tags: [Orders]
+      summary: List the caller's orders
+      description: Returns a page of the caller's orders, filtered and sorted per the query parameters. All filter / sort parameters are optional and combine with AND semantics.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter to orders whose `status` matches exactly.
+          schema:
+            $ref: "#/components/schemas/OrderStatus"
+          example: PAID
+        - name: orderNumber
+          in: query
+          required: false
+          description: Case-insensitive substring match against `order_number`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 23
+          example: "20260612"
+        - name: amountMin
+          in: query
+          required: false
+          description: Returns orders with `totalPrice >= amountMin`.
+          schema:
+            type: number
+            minimum: 0
+          example: 50.00
+        - name: amountMax
+          in: query
+          required: false
+          description: Returns orders with `totalPrice <= amountMax`.
+          schema:
+            type: number
+            minimum: 0
+          example: 500.00
+        - name: dateFrom
+          in: query
+          required: false
+          description: Returns orders with `createdAt >= dateFrom` (inclusive, ISO date `YYYY-MM-DD`).
+          schema:
+            type: string
+            format: date
+          example: "2026-04-01"
+        - name: dateTo
+          in: query
+          required: false
+          description: Returns orders with `createdAt <= dateTo` (inclusive, ISO date `YYYY-MM-DD`).
+          schema:
+            type: string
+            format: date
+          example: "2026-04-30"
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted the server sorts by `createdAt` descending.
+          schema:
+            type: string
+            enum: [date, total]
+          example: date
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Defaults to `desc`.
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: desc
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+          example: 0
+        - name: pageSize
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+          example: 10
+      responses:
+        "200":
+          description: Page of orders matching the filter (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListPage"
+
+  /api/orders/{orderNumber}:
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      summary: Get an order's full detail
+      description: Returns the order header, line items, shipping address, and payment row. Returns `404` when the order does not exist or belongs to a different user.
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "200":
+          description: Order detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetail"
+
+  /api/orders/{orderNumber}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [Orders]
+      summary: Cancel a PAID order
+      description: |
+        Cancels a `PAID` order owned by the caller. Atomically flips the order to `CANCELLED_BY_USER`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/orders/{orderNumber}` to render the new state.
+
+        Responses:
+          * `204` -- order cancelled.
+          * `404` -- order not found or belongs to another user.
+          * `409` -- order found but no longer cancellable.
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "204":
+          description: Order cancelled. Empty body.
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: HttpOnly Secure SameSite=Lax JWT.
+
+  parameters:
+    OrderNumberPath:
+      name: orderNumber
+      in: path
+      required: true
+      description: 23-char order number in `ORD-YYYYMMDD-XXXXXXXXXX` format.
+      schema:
+        type: string
+        minLength: 23
+        maxLength: 23
+        pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
+      example: ORD-20260612-A1B2C3D4E5
+
+  schemas:
+    OrderStatus:
+      type: string
+      description: Order lifecycle status.
+      enum:
+        - PAID
+        - CANCELLED_BY_USER
+        - CANCELLED_BY_ADMIN
+        - SHIPPED
+        - DELIVERED
+        - DONE
+      example: PAID
+
+    PaymentStatus:
+      type: string
+      description: Payment lifecycle status.
+      enum: [SUCCESS, REFUNDED]
+      example: SUCCESS
+
+    OrderSummary:
+      type: object
+      description: One row on the Order History list.
+      required:
+        - orderNumber
+        - status
+        - createdAt
+        - itemCount
+        - totalPrice
+      properties:
+        orderNumber:
+          type: string
+          minLength: 23
+          maxLength: 23
+          pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
+          example: ORD-20260612-A1B2C3D4E5
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the order was placed (UTC).
+          example: "2026-04-12T14:32:00Z"
+        itemCount:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Number of distinct line items in the order.
+          example: 3
+        totalPrice:
+          type: number
+          minimum: 0
+          description: Sum of the order's line totals.
+          example: 419.00
+
+    OrderListPage:
+      type: object
+      description: Paged envelope returned by `GET /api/orders`.
+      required: [items, page, pageSize, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          description: Orders on the current page (may be empty).
+          items:
+            $ref: "#/components/schemas/OrderSummary"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based index of the returned page.
+          example: 0
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Items per page that the server attempted to return.
+          example: 10
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total orders matching the filter across all pages.
+          example: 23
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Total pages at the current `pageSize`.
+          example: 3
+
+    OrderItem:
+      type: object
+      description: One line item on the order, taken from the snapshot saved at checkout time.
+      required:
+        - productId
+        - productName
+        - size
+        - quantity
+        - pricePerUnit
+        - lineTotal
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Identifier of the product at order time.
+          example: 1
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Product name at order time.
+          example: Spalding NBA Basketball
+        productImageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Product image URL at order time; `null` when no image was attached.
+          example: /images/products/basketball-spalding.jpg
+        size:
+          type: string
+          minLength: 1
+          maxLength: 20
+          description: Size token the user selected.
+          example: ONE_SIZE
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Quantity purchased on this line.
+          example: 2
+        pricePerUnit:
+          type: number
+          minimum: 0
+          description: Product unit price at order time.
+          example: 29.99
+        lineTotal:
+          type: number
+          minimum: 0
+          description: "`pricePerUnit * quantity`."
+          example: 59.98
+
+    OrderShipping:
+      type: object
+      description: Shipping address captured at checkout.
+      required: [fullName, email, phone, country, city, addressLine]
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: Jane Doe
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+          example: jane.doe@example.com
+        phone:
+          type: string
+          minLength: 10
+          maxLength: 10
+          pattern: "^05\\d{8}$"
+          example: "0521234567"
+        country:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Israel
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Tel Aviv
+        addressLine:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: 12 Allenby St, Apt 4
+
+    OrderPayment:
+      type: object
+      description: Payment row associated with the order.
+      required:
+        - provider
+        - transactionId
+        - amount
+        - currency
+        - status
+        - processedAt
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: Payment provider identifier.
+          example: MOCK_CARD
+        transactionId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Provider transaction id.
+          example: txn_abc123
+        amount:
+          type: number
+          minimum: 0
+          description: Amount paid.
+          example: 419.00
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: "^[A-Z]{3}$"
+          description: ISO 4217 currency code.
+          example: USD
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        processedAt:
+          type: string
+          format: date-time
+          description: When the payment was first persisted (UTC).
+          example: "2026-04-12T14:32:00Z"
+        refundedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the payment was refunded (UTC); `null` when `status != REFUNDED`.
+          example: "2026-04-15T10:04:00Z"
+
+    OrderDetail:
+      type: object
+      description: Full detail view of a single order.
+      required:
+        - orderNumber
+        - status
+        - createdAt
+        - totalPrice
+        - itemCount
+        - items
+        - shipping
+        - payment
+      properties:
+        orderNumber:
+          type: string
+          minLength: 23
+          maxLength: 23
+          pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
+          example: ORD-20260612-A1B2C3D4E5
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the order was placed (UTC).
+          example: "2026-04-12T14:32:00Z"
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the order was cancelled (UTC); `null` when not cancelled.
+          example: "2026-04-15T10:04:00Z"
+        totalPrice:
+          type: number
+          minimum: 0
+          description: Order total.
+          example: 419.00
+        itemCount:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Number of distinct line items.
+          example: 3
+        items:
+          type: array
+          minItems: 1
+          description: Line items on the order.
+          items:
+            $ref: "#/components/schemas/OrderItem"
+        shipping:
+          $ref: "#/components/schemas/OrderShipping"
+        payment:
+          $ref: "#/components/schemas/OrderPayment"
