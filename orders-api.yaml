@@ -136,21 +136,17 @@ paths:
       tags: [Orders]
       summary: Cancel a PAID order
       description: |
-        Cancels a `PAID` order owned by the caller. Atomically flips the order to `CANCELLED_BY_USER`, restores stock for every line, and marks the payment `REFUNDED`. Returns the updated `OrderDetail`.
+        Cancels a `PAID` order owned by the caller. Atomically flips the order to `CANCELLED_BY_USER`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/orders/{orderNumber}` to render the new state.
 
         Responses:
-          * `200` -- the updated `OrderDetail`.
+          * `204` -- order cancelled.
           * `404` -- order not found or belongs to another user.
           * `409` -- order found but no longer cancellable.
       parameters:
         - $ref: "#/components/parameters/OrderNumberPath"
       responses:
-        "200":
-          description: Order cancelled; returns the updated `OrderDetail`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrderDetail"
+        "204":
+          description: Order cancelled. Empty body.
 
 components:
   securitySchemes:
