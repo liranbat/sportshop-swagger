@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Auth & Users API
-  description: Authentication endpoints (sign up, sign in, sign out, refresh, /me) plus self-service profile endpoints (edit, change password, soft-delete own account).
+  description: Authentication endpoints (sign up, sign in, sign out, refresh, /me), self-service profile endpoints (edit, change password, soft-delete own account), and admin operations on users + sessions (list, view, edit, promote / demote, soft-delete / restore, list sessions, revoke single, revoke all).
   version: 0.1.0
 
 servers:
@@ -14,6 +14,10 @@ tags:
     description: Sign up, sign in, sign out, refresh, /me
   - name: Users
     description: Self-service profile endpoints
+  - name: Admin Users
+    description: Admin operations on users -- list, view, edit, promote / demote, soft-delete / restore, reset password.
+  - name: Admin Sessions
+    description: Admin operations on refresh-token sessions -- list active, revoke single, revoke all for a user.
 
 paths:
   /api/auth/register:
@@ -180,6 +184,79 @@ paths:
         "204":
           description: Password updated.
 
+  /api/admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [Admin Users]
+      summary: List users (admin)
+      description: Returns a page of users matching the role / status / search-term filters and the chosen sort, paginated zero-based. Soft-deleted users are excluded by default; include them via `status=Deleted` or `status=All`. The acting admin's own row is included.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: role
+          in: query
+          required: false
+          description: Filter by role. Absent = no role filter.
+          schema:
+            $ref: "#/components/schemas/UserRoleFilter"
+          example: ADMIN
+        - name: status
+          in: query
+          required: false
+          description: Filter by deletion state. Absent = no status filter (both active and soft-deleted users are returned).
+          schema:
+            $ref: "#/components/schemas/UserStatusFilter"
+          example: ACTIVE
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match against `firstName`, `lastName`, `email`, `phone`, and the concatenated `firstName lastName` / `lastName firstName`, so a query like `Liran Batson` finds the user. Trimmed; empty after trim is ignored.
+          schema:
+            type: string
+            maxLength: 200
+          example: jane
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted the server sorts by `id` descending (newest first).
+          schema:
+            type: string
+            enum: [id, name, email]
+          example: id
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Defaults are field-specific (`id` desc, `name` / `email` asc).
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: desc
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+          example: 0
+        - name: pageSize
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+          example: 20
+      responses:
+        "200":
+          description: Page of users matching the filters (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListPage"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -289,8 +366,8 @@ components:
 
     UserResponse:
       type: object
-      description: Shared user payload returned by register/login/refresh/getMe/updateProfile.
-      required: [id, firstName, lastName, email, phone, isAdmin]
+      description: Shared user payload. Returned by register / login / refresh / getMe / updateProfile, and reused as the row shape on the Admin User List + Admin User Detail. Self-flow callers always see `isDeleted = false` (a deleted user can't authenticate).
+      required: [id, firstName, lastName, email, phone, isAdmin, isDeleted]
       properties:
         id:
           type: integer
@@ -314,3 +391,49 @@ components:
           type: boolean
           description: Drives LoggedIn vs LoggedInAdmin Navbar variant and admin-route guards.
           example: false
+        isDeleted:
+          type: boolean
+          description: Soft-delete flag. Always `false` on self-flow endpoints; surfaces as the Deleted badge / dimmed row on the Admin User List + Admin User Detail.
+          example: false
+
+    UserRoleFilter:
+      type: string
+      description: Role filter for the admin user list. Omit the param entirely for "no role filter" (the UI's "All roles" sentinel).
+      enum:
+        - ADMIN
+        - USER
+      example: ADMIN
+
+    UserStatusFilter:
+      type: string
+      description: Deletion-state filter for the admin user list. Omit the param entirely for "no status filter" (the UI's "All statuses" sentinel) -- both active and soft-deleted users are returned.
+      enum:
+        - ACTIVE
+        - DELETED
+      example: ACTIVE
+
+    UserListPage:
+      type: object
+      description: Page of users for the admin list. Items reuse `UserResponse`.
+      required: [items, page, pageSize, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserResponse"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
