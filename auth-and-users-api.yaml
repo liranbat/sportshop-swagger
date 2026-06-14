@@ -189,7 +189,7 @@ paths:
       operationId: listAdminUsers
       tags: [Admin Users]
       summary: List users (admin)
-      description: Returns a page of users matching the role / status / search-term filters and the chosen sort, paginated zero-based. Soft-deleted users are excluded by default; include them via `status=Deleted` or `status=All`. The acting admin's own row is included.
+      description: Returns a page of users matching the role / status / search-term filters and the chosen sort, paginated zero-based. The acting admin's own row is included. When `status` is omitted, both active and soft-deleted users are returned.
       security:
         - cookieAuth: []
       parameters:
@@ -256,6 +256,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserListPage"
+
+  /api/admin/users/{id}:
+    get:
+      operationId: getAdminUserById
+      tags: [Admin Users]
+      summary: Get a user by id (admin)
+      description: Returns the user (active or soft-deleted). 404 if no user exists with that id.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+    patch:
+      operationId: updateAdminUser
+      tags: [Admin Users]
+      summary: Update a user's profile (admin)
+      description: Updates `firstName`, `lastName`, `phone` on the target user. Last-writer-wins on field values. Soft-deleted users are still editable by admins (the deletion state is not a precondition of this update). Email and password are not editable here. Returns the updated user. 404 if no user exists with that id.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
 
 components:
   securitySchemes:
