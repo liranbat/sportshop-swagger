@@ -430,6 +430,118 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
+  /api/admin/sessions:
+    get:
+      operationId: listAdminSessions
+      tags: [Admin Sessions]
+      summary: List active sessions (admin)
+      description: |
+        Returns a page of active `refresh_tokens` rows joined with the owning user's `firstName`, `lastName`, `email`. Default sort is `expiresAt DESC, id ASC` (most-recently-active first; under rotation-on-refresh `expiresAt` slides forward on every successful refresh and carries the same triage signal). Under the single-session invariant (`UNIQUE(user_id)`) there is at most one row per user, so this list is also a 1:1 listing of currently-signed-in users.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match against the joined user's `firstName`, `lastName`, `email`, and the concatenated `firstName lastName` / `lastName firstName`. Trimmed; empty after trim is ignored.
+          schema:
+            type: string
+            maxLength: 200
+          example: liran
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted the server sorts by `expiresAt`. Sort by `user` is implemented server-side as `ORDER BY users.email`.
+          schema:
+            type: string
+            enum: [user, expiresAt]
+          example: expiresAt
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Defaults are field-specific (`expiresAt` desc, `user` asc).
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: desc
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+          example: 0
+        - name: pageSize
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+          example: 20
+      responses:
+        "200":
+          description: Page of sessions matching the filters (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListPage"
+
+    delete:
+      operationId: revokeAllAdminSessions
+      tags: [Admin Sessions]
+      summary: Revoke all sessions except the acting admin's (Revoke All)
+      description: |
+        Hard-deletes every `refresh_tokens` row whose `user_id <> :actingAdminId`. The acting admin's own session is excluded by SQL (FA-8 self-exclusion). Idempotent target-state assertion — firing against a system with no other sessions still returns 200 with `affectedRowCount: 0`. The `scope` query parameter must equal `others` for explicit scope disambiguation.
+        - 200 — succeeded; response body returns `affectedRowCount`.
+        - 400 — `scope` is missing or not `others`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          description: Must be `others`. Reserved query parameter for explicit scope disambiguation; future variants would add a new value here.
+          schema:
+            type: string
+            enum: [others]
+          example: others
+      responses:
+        "200":
+          description: Sessions revoked (or no-op).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRevokeAllResponse"
+
+  /api/admin/sessions/{sessionId}:
+    delete:
+      operationId: revokeAdminSession
+      tags: [Admin Sessions]
+      summary: Revoke a single session (Revoke)
+      description: |
+        Hard-deletes the `refresh_tokens` row with the given id. Conditional on the row currently existing AND not belonging to the acting admin (FA-8 self-exclusion enforced at the SQL level).
+        - 204 — revoked.
+        - 409 — `"This session has already been revoked by someone else."` covers all rejection cases: the target row was already deleted (concurrent revoke race), no row exists with that id, or the row belongs to the acting admin (FA-8). The UI silently disables the per-row Revoke button on the actor's own row, so the FA-8 path is a defense-in-depth fall-through for direct API calls.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          description: Target session row id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 42
+      responses:
+        "204":
+          description: Session revoked.
+
 components:
   securitySchemes:
     cookieAuth:
@@ -610,3 +722,71 @@ components:
           type: integer
           format: int32
           minimum: 0
+
+    Session:
+      type: object
+      description: A single active refresh-token session row joined with the owning user's identity columns.
+      required: [id, userId, firstName, lastName, email, expiresAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: refresh_tokens row id; the target of `DELETE /api/admin/sessions/{sessionId}`.
+          example: 42
+        userId:
+          type: integer
+          format: int64
+          example: 7
+        firstName:
+          type: string
+          example: Liran
+        lastName:
+          type: string
+          example: Bat
+        email:
+          type: string
+          format: email
+          example: liran@example.com
+        expiresAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp; slides forward by `refreshTokenTtl` on every successful `/auth/refresh` call (rotation-on-refresh).
+          example: "2026-04-23T10:14:00Z"
+
+    SessionListPage:
+      type: object
+      description: Page of sessions for the admin sessions list. Items use the `Session` shape.
+      required: [items, page, pageSize, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+
+    SessionRevokeAllResponse:
+      type: object
+      description: Response body of `DELETE /api/admin/sessions?scope=others`.
+      required: [affectedRowCount]
+      properties:
+        affectedRowCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of refresh-token rows actually deleted. Excludes the acting admin's own session (FA-8 self-exclusion).
+          example: 12
