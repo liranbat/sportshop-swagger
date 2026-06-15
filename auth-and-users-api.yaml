@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Auth & Users API
-  description: Authentication endpoints (sign up, sign in, sign out, refresh, /me) plus self-service profile endpoints (edit, change password, soft-delete own account).
+  description: Authentication endpoints (sign up, sign in, sign out, refresh, /me), self-service profile endpoints (edit, change password, soft-delete own account), and admin operations on users + sessions (list, view, edit, promote / demote, soft-delete / restore, list sessions, revoke single, revoke all).
   version: 0.1.0
 
 servers:
@@ -14,6 +14,10 @@ tags:
     description: Sign up, sign in, sign out, refresh, /me
   - name: Users
     description: Self-service profile endpoints
+  - name: Admin Users
+    description: Admin operations on users -- list, view, edit, promote / demote, soft-delete / restore, reset password.
+  - name: Admin Sessions
+    description: Admin operations on refresh-token sessions -- list active, revoke single, revoke all for a user.
 
 paths:
   /api/auth/register:
@@ -180,13 +184,371 @@ paths:
         "204":
           description: Password updated.
 
+  /api/admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [Admin Users]
+      summary: List users (admin)
+      description: Returns a page of users matching the role / status / search-term filters and the chosen sort, paginated zero-based. The acting admin's own row is included. When `status` is omitted, both active and soft-deleted users are returned.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: role
+          in: query
+          required: false
+          description: Filter by role. Absent = no role filter.
+          schema:
+            $ref: "#/components/schemas/UserRoleFilter"
+          example: ADMIN
+        - name: status
+          in: query
+          required: false
+          description: Filter by deletion state. Absent = no status filter (both active and soft-deleted users are returned).
+          schema:
+            $ref: "#/components/schemas/UserStatusFilter"
+          example: ACTIVE
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match against `firstName`, `lastName`, `email`, `phone`, and the concatenated `firstName lastName` / `lastName firstName`, so a query like `Liran Batson` finds the user. Trimmed; empty after trim is ignored.
+          schema:
+            type: string
+            maxLength: 200
+          example: jane
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted the server sorts by `id` descending (newest first).
+          schema:
+            type: string
+            enum: [id, name, email]
+          example: id
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Defaults are field-specific (`id` desc, `name` / `email` asc).
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: desc
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+          example: 0
+        - name: pageSize
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+          example: 20
+      responses:
+        "200":
+          description: Page of users matching the filters (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListPage"
+
+  /api/admin/users/{id}:
+    get:
+      operationId: getAdminUserById
+      tags: [Admin Users]
+      summary: Get a user by id (admin)
+      description: Returns the user (active or soft-deleted). 404 if no user exists with that id.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+    patch:
+      operationId: updateAdminUser
+      tags: [Admin Users]
+      summary: Update a user's profile (admin)
+      description: Updates `firstName`, `lastName`, `phone` on the target user. Last-writer-wins on field values. Soft-deleted users are still editable by admins (the deletion state is not a precondition of this update). Email and password are not editable here. Returns the updated user. 404 if no user exists with that id.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/promote:
+    put:
+      operationId: promoteAdminUser
+      tags: [Admin Users]
+      summary: Promote a user to admin
+      description: |
+        Sets `isAdmin = true` on the target user. Conditional on the target currently being a non-admin and not soft-deleted; otherwise the call is rejected with 409. Self-promotion is allowed (a no-op since you'd already be an admin to call this).
+        - 200 — promoted; response is the updated user.
+        - 409 — target is already an admin, has been soft-deleted, or no user exists with that id (`"User is already an admin or has been deleted."`).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User promoted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/demote:
+    put:
+      operationId: demoteAdminUser
+      tags: [Admin Users]
+      summary: Demote a user from admin
+      description: |
+        Sets `isAdmin = false` on the target user. Conditional on the target currently being an admin, not soft-deleted, and not the last remaining admin; otherwise rejected with 409. Self-demotion is allowed; the acting admin loses admin privileges on the next request (the `RequireAdmin` frontend guard redirects them off any admin route once `X-Auth-Role` flips).
+        - 200 — demoted; response is the updated user.
+        - 409 — `"User is not an admin, has been deleted, or is the last remaining admin."` covers all rejection cases: the target is already non-admin, soft-deleted, no user exists with that id, or the demote would leave zero active admins (atomic `count > 1` check).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User demoted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/soft-delete:
+    post:
+      operationId: softDeleteAdminUser
+      tags: [Admin Users]
+      summary: Soft-delete a user (admin)
+      description: |
+        Sets `isDeleted = true` on the target and drops their `refresh_tokens` in-transaction; `cart_items` cleanup runs fire-and-forget after commit. Conditional on the target currently being active and not being the last remaining admin.
+        - 200 — soft-deleted; response is the updated user.
+        - 409 — `"Cannot delete the last remaining admin. Promote another user first."` (pre-check: target is the only active admin — applies whether the admin is targeting themselves via the admin route or another admin) OR `"User has already been deleted, does not exist, or is the last remaining admin."` (atomic catch-all when the SQL guard rejects: target was already soft-deleted, no user exists with that id, or the last-admin status changed in the race window after the pre-check).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User soft-deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/restore:
+    post:
+      operationId: restoreAdminUser
+      tags: [Admin Users]
+      summary: Restore a soft-deleted user
+      description: |
+        Sets `isDeleted = false` and clears the deletion attribution fields. Conditional on the target currently being soft-deleted. Cart and sessions are not recovered (they were hard-deleted at original soft-delete time).
+        - 200 — restored; response is the updated user.
+        - 409 — `"This user is no longer deleted — another admin already restored them."` (target is not soft-deleted, or no user exists with that id).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/sessions:
+    get:
+      operationId: listAdminSessions
+      tags: [Admin Sessions]
+      summary: List active sessions (admin)
+      description: |
+        Returns a page of active `refresh_tokens` rows joined with the owning user's `firstName`, `lastName`, `email`. Default sort is `expiresAt DESC, id ASC` (most-recently-active first; under rotation-on-refresh `expiresAt` slides forward on every successful refresh and carries the same triage signal). Under the single-session invariant (`UNIQUE(user_id)`) there is at most one row per user, so this list is also a 1:1 listing of currently-signed-in users.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match against the joined user's `firstName`, `lastName`, `email`, and the concatenated `firstName lastName` / `lastName firstName`. Trimmed; empty after trim is ignored.
+          schema:
+            type: string
+            maxLength: 200
+          example: liran
+        - name: sortField
+          in: query
+          required: false
+          description: Sort column. When omitted the server sorts by `expiresAt`. Sort by `user` is implemented server-side as `ORDER BY users.email`.
+          schema:
+            type: string
+            enum: [user, expiresAt]
+          example: expiresAt
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction. Defaults are field-specific (`expiresAt` desc, `user` asc).
+          schema:
+            type: string
+            enum: [asc, desc]
+          example: desc
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+          example: 0
+        - name: pageSize
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+          example: 20
+      responses:
+        "200":
+          description: Page of sessions matching the filters (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListPage"
+
+    delete:
+      operationId: revokeAllAdminSessions
+      tags: [Admin Sessions]
+      summary: Revoke all sessions except the acting admin's (Revoke All)
+      description: |
+        Hard-deletes every `refresh_tokens` row whose `user_id <> :actingAdminId`. The acting admin's own session is excluded by SQL (FA-8 self-exclusion). Idempotent target-state assertion — firing against a system with no other sessions still returns 200 with `affectedRowCount: 0`. The `scope` query parameter must equal `others` for explicit scope disambiguation.
+        - 200 — succeeded; response body returns `affectedRowCount`.
+        - 400 — `scope` is missing or not `others`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          description: Must be `others`. Reserved query parameter for explicit scope disambiguation; future variants would add a new value here.
+          schema:
+            type: string
+            enum: [others]
+          example: others
+      responses:
+        "200":
+          description: Sessions revoked (or no-op).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRevokeAllResponse"
+
+  /api/admin/sessions/{sessionId}:
+    delete:
+      operationId: revokeAdminSession
+      tags: [Admin Sessions]
+      summary: Revoke a single session (Revoke)
+      description: |
+        Hard-deletes the `refresh_tokens` row with the given id. Conditional on the row currently existing AND not belonging to the acting admin (FA-8 self-exclusion enforced at the SQL level).
+        - 204 — revoked.
+        - 409 — `"This session has already been revoked by someone else."` covers all rejection cases: the target row was already deleted (concurrent revoke race), no row exists with that id, or the row belongs to the acting admin (FA-8). The UI silently disables the per-row Revoke button on the actor's own row, so the FA-8 path is a defense-in-depth fall-through for direct API calls.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          description: Target session row id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 42
+      responses:
+        "204":
+          description: Session revoked.
+
 components:
   securitySchemes:
     cookieAuth:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
+      description: HttpOnly Secure SameSite=Lax JWT.
     refreshCookieAuth:
       type: apiKey
       in: cookie
@@ -289,8 +651,8 @@ components:
 
     UserResponse:
       type: object
-      description: Shared user payload returned by register/login/refresh/getMe/updateProfile.
-      required: [id, firstName, lastName, email, phone, isAdmin]
+      description: Shared user payload. Returned by register / login / refresh / getMe / updateProfile, and reused as the row shape on the Admin User List + Admin User Detail. Self-flow callers always see `isDeleted = false` (a deleted user can't authenticate).
+      required: [id, firstName, lastName, email, phone, isAdmin, isDeleted]
       properties:
         id:
           type: integer
@@ -314,3 +676,117 @@ components:
           type: boolean
           description: Drives LoggedIn vs LoggedInAdmin Navbar variant and admin-route guards.
           example: false
+        isDeleted:
+          type: boolean
+          description: Soft-delete flag. Always `false` on self-flow endpoints; surfaces as the Deleted badge / dimmed row on the Admin User List + Admin User Detail.
+          example: false
+
+    UserRoleFilter:
+      type: string
+      description: Role filter for the admin user list. Omit the param entirely for "no role filter" (the UI's "All roles" sentinel).
+      enum:
+        - ADMIN
+        - USER
+      example: ADMIN
+
+    UserStatusFilter:
+      type: string
+      description: Deletion-state filter for the admin user list. Omit the param entirely for "no status filter" (the UI's "All statuses" sentinel) -- both active and soft-deleted users are returned.
+      enum:
+        - ACTIVE
+        - DELETED
+      example: ACTIVE
+
+    UserListPage:
+      type: object
+      description: Page of users for the admin list. Items reuse `UserResponse`.
+      required: [items, page, pageSize, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserResponse"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+
+    Session:
+      type: object
+      description: A single active refresh-token session row joined with the owning user's identity columns.
+      required: [id, userId, firstName, lastName, email, expiresAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: refresh_tokens row id; the target of `DELETE /api/admin/sessions/{sessionId}`.
+          example: 42
+        userId:
+          type: integer
+          format: int64
+          example: 7
+        firstName:
+          type: string
+          example: Liran
+        lastName:
+          type: string
+          example: Bat
+        email:
+          type: string
+          format: email
+          example: liran@example.com
+        expiresAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp; slides forward by `refreshTokenTtl` on every successful `/auth/refresh` call (rotation-on-refresh).
+          example: "2026-04-23T10:14:00Z"
+
+    SessionListPage:
+      type: object
+      description: Page of sessions for the admin sessions list. Items use the `Session` shape.
+      required: [items, page, pageSize, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        pageSize:
+          type: integer
+          format: int32
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+
+    SessionRevokeAllResponse:
+      type: object
+      description: Response body of `DELETE /api/admin/sessions?scope=others`.
+      required: [affectedRowCount]
+      properties:
+        affectedRowCount:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of refresh-token rows actually deleted. Excludes the acting admin's own session (FA-8 self-exclusion).
+          example: 12
