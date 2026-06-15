@@ -372,6 +372,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
+  /api/admin/users/{id}/soft-delete:
+    post:
+      operationId: softDeleteAdminUser
+      tags: [Admin Users]
+      summary: Soft-delete a user (admin)
+      description: |
+        Sets `isDeleted = true` on the target and drops their `refresh_tokens` in-transaction; `cart_items` cleanup runs fire-and-forget after commit. Conditional on the target currently being active and not being the last remaining admin.
+        - 200 — soft-deleted; response is the updated user.
+        - 409 — `"Cannot delete the last remaining admin. Promote another user first."` (pre-check: target is the only active admin — applies whether the admin is targeting themselves via the admin route or another admin) OR `"User has already been deleted, does not exist, or is the last remaining admin."` (atomic catch-all when the SQL guard rejects: target was already soft-deleted, no user exists with that id, or the last-admin status changed in the race window after the pre-check).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User soft-deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/restore:
+    post:
+      operationId: restoreAdminUser
+      tags: [Admin Users]
+      summary: Restore a soft-deleted user
+      description: |
+        Sets `isDeleted = false` and clears the deletion attribution fields. Conditional on the target currently being soft-deleted. Cart and sessions are not recovered (they were hard-deleted at original soft-delete time).
+        - 200 — restored; response is the updated user.
+        - 409 — `"This user is no longer deleted — another admin already restored them."` (target is not soft-deleted, or no user exists with that id).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
 components:
   securitySchemes:
     cookieAuth:
