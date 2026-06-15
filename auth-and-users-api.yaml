@@ -314,13 +314,71 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
+  /api/admin/users/{id}/promote:
+    put:
+      operationId: promoteAdminUser
+      tags: [Admin Users]
+      summary: Promote a user to admin
+      description: |
+        Sets `isAdmin = true` on the target user. Conditional on the target currently being a non-admin and not soft-deleted; otherwise the call is rejected with 409. Self-promotion is allowed (a no-op since you'd already be an admin to call this).
+        - 200 — promoted; response is the updated user.
+        - 409 — target is already an admin, has been soft-deleted, or no user exists with that id (`"User is already an admin or has been deleted."`).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User promoted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
+  /api/admin/users/{id}/demote:
+    put:
+      operationId: demoteAdminUser
+      tags: [Admin Users]
+      summary: Demote a user from admin
+      description: |
+        Sets `isAdmin = false` on the target user. Conditional on the target currently being an admin, not soft-deleted, and not the last remaining admin; otherwise rejected with 409. Self-demotion is allowed; the acting admin loses admin privileges on the next request (the `RequireAdmin` frontend guard redirects them off any admin route once `X-Auth-Role` flips).
+        - 200 — demoted; response is the updated user.
+        - 409 — `"User is not an admin, has been deleted, or is the last remaining admin."` covers all rejection cases: the target is already non-admin, soft-deleted, no user exists with that id, or the demote would leave zero active admins (atomic `count > 1` check).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target user id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: User demoted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+
 components:
   securitySchemes:
     cookieAuth:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
+      description: HttpOnly Secure SameSite=Lax JWT.
     refreshCookieAuth:
       type: apiKey
       in: cookie
