@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Orders API
-  description: Read the caller's order history, read a single order's detail, and cancel a PAID order. Every endpoint is scoped to the authenticated caller; non-owner reads return `404`.
+  description: Read the caller's order history, read a single order's detail, and cancel a PAID order. Every user-facing endpoint is scoped to the authenticated caller; non-owner reads return `404`. Admin operations live under `/api/admin/orders/*` and require the `ADMIN` role -- list any user's orders (with customer search), read any order's detail (with customer info), cancel from `{PAID, SHIPPED, DELIVERED}`, transition status within the fulfillment trio (and one-way to `DONE`), and edit the shipping address with optimistic concurrency anchored on `updated_at`.
   version: 0.1.0
 
 servers:
@@ -12,6 +12,8 @@ servers:
 tags:
   - name: Orders
     description: Order history, order detail, user-initiated cancellation.
+  - name: Admin Orders
+    description: Admin operations on orders -- list (with customer search), view, cancel, update fulfillment status, edit shipping address. All endpoints require the `ADMIN` role.
 
 security:
   - cookieAuth: []
@@ -24,88 +26,16 @@ paths:
       summary: List the caller's orders
       description: Returns a page of the caller's orders, filtered and sorted per the query parameters. All filter / sort parameters are optional and combine with AND semantics.
       parameters:
-        - name: status
-          in: query
-          required: false
-          description: Filter to orders whose `status` matches exactly.
-          schema:
-            $ref: "#/components/schemas/OrderStatus"
-          example: PAID
-        - name: orderNumber
-          in: query
-          required: false
-          description: Case-insensitive substring match against `order_number`.
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 23
-          example: "20260612"
-        - name: amountMin
-          in: query
-          required: false
-          description: Returns orders with `totalPrice >= amountMin`.
-          schema:
-            type: number
-            minimum: 0
-          example: 50.00
-        - name: amountMax
-          in: query
-          required: false
-          description: Returns orders with `totalPrice <= amountMax`.
-          schema:
-            type: number
-            minimum: 0
-          example: 500.00
-        - name: dateFrom
-          in: query
-          required: false
-          description: Returns orders with `createdAt >= dateFrom` (inclusive, ISO date `YYYY-MM-DD`).
-          schema:
-            type: string
-            format: date
-          example: "2026-04-01"
-        - name: dateTo
-          in: query
-          required: false
-          description: Returns orders with `createdAt <= dateTo` (inclusive, ISO date `YYYY-MM-DD`).
-          schema:
-            type: string
-            format: date
-          example: "2026-04-30"
-        - name: sortField
-          in: query
-          required: false
-          description: Sort column. When omitted the server sorts by `createdAt` descending.
-          schema:
-            type: string
-            enum: [date, total]
-          example: date
-        - name: sortDirection
-          in: query
-          required: false
-          description: Sort direction. Defaults to `desc`.
-          schema:
-            type: string
-            enum: [asc, desc]
-          example: desc
-        - name: page
-          in: query
-          required: false
-          description: Zero-based page index.
-          schema:
-            type: integer
-            format: int32
-            minimum: 0
-          example: 0
-        - name: pageSize
-          in: query
-          required: false
-          description: Items per page.
-          schema:
-            type: integer
-            format: int32
-            minimum: 1
-          example: 10
+        - $ref: "#/components/parameters/OrderStatusFilter"
+        - $ref: "#/components/parameters/OrderNumberFilter"
+        - $ref: "#/components/parameters/OrderAmountMinFilter"
+        - $ref: "#/components/parameters/OrderAmountMaxFilter"
+        - $ref: "#/components/parameters/OrderDateFromFilter"
+        - $ref: "#/components/parameters/OrderDateToFilter"
+        - $ref: "#/components/parameters/OrderSortField"
+        - $ref: "#/components/parameters/OrderSortDirection"
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
           description: Page of orders matching the filter (may be empty).
@@ -148,6 +78,132 @@ paths:
         "204":
           description: Order cancelled. Empty body.
 
+  /api/admin/orders:
+    get:
+      operationId: listAdminOrders
+      tags: [Admin Orders]
+      summary: List any user's orders (admin)
+      description: Returns a page of all orders matching the filter / sort parameters, regardless of owning user. The acting admin's own orders are included. All filter / sort parameters are optional and combine with AND semantics. A universal `id ASC` tie-breaker is applied after the primary sort.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderStatusFilter"
+        - $ref: "#/components/parameters/OrderNumberFilter"
+        - $ref: "#/components/parameters/OrderCustomerFilter"
+        - $ref: "#/components/parameters/OrderAmountMinFilter"
+        - $ref: "#/components/parameters/OrderAmountMaxFilter"
+        - $ref: "#/components/parameters/OrderDateFromFilter"
+        - $ref: "#/components/parameters/OrderDateToFilter"
+        - $ref: "#/components/parameters/OrderSortField"
+        - $ref: "#/components/parameters/OrderSortDirection"
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Page of orders matching the filter (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderListPage"
+
+  /api/admin/orders/{orderNumber}:
+    get:
+      operationId: getAdminOrder
+      tags: [Admin Orders]
+      summary: Get any order's full detail (admin)
+      description: Returns the order header, line items, shipping address, payment row, and the owning customer's identity — regardless of who placed the order. Returns `404` only when the order number does not exist; cross-user reads are permitted.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "200":
+          description: Order detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetail"
+
+  /api/admin/orders/{orderNumber}/cancel:
+    post:
+      operationId: cancelAdminOrder
+      tags: [Admin Orders]
+      summary: Cancel any order (admin)
+      description: |
+        Cancels any order in `{PAID, SHIPPED, DELIVERED}` regardless of owning user. Atomically flips the order to `CANCELLED_BY_ADMIN`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}` to render the new state.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at` and on `cancelled_by`; the `status` value (`CANCELLED_BY_ADMIN` vs. `CANCELLED_BY_USER`) is what distinguishes the initiator.
+
+        Responses:
+          * `204` -- order cancelled.
+          * `404` -- order does not exist.
+          * `409` -- order found but no longer cancellable (already cancelled, already `DONE`, etc.).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "204":
+          description: Order cancelled. Empty body.
+
+  /api/admin/orders/{orderNumber}/update-status:
+    post:
+      operationId: updateAdminOrderStatus
+      tags: [Admin Orders]
+      summary: Change an order's fulfillment status (admin)
+      description: |
+        Atomically moves an order along the lifecycle state machine: `PAID` ↔ `SHIPPED` ↔ `DELIVERED`, plus the skip `PAID` ↔ `DELIVERED` and one-way `→ DONE` from any of `PAID` / `SHIPPED` / `DELIVERED`. No transitions out of `DONE` / `CANCELLED_*`, no self-loops. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at`.
+
+        Responses:
+          * `204` -- status updated.
+          * `400` -- `priorStatus → targetStatus` is not a legal transition.
+          * `404` -- order does not exist.
+          * `409` -- current status no longer matches `priorStatus` (raced).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderStatusRequest"
+      responses:
+        "204":
+          description: Status updated. Empty body.
+
+  /api/admin/orders/{orderNumber}/update-shipping:
+    post:
+      operationId: updateAdminOrderShipping
+      tags: [Admin Orders]
+      summary: Edit an order's shipping address (admin)
+      description: |
+        Replaces the shipping address on an order whose status is one of `{PAID, SHIPPED, DELIVERED}`. All six `shipping` fields are required and validated against the same rules as checkout. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at`. `cancelled_by` / `cancelled_at` are untouched.
+
+        Responses:
+          * `204` -- shipping address updated.
+          * `400` -- request body fails validation, or `priorStatus` is not one of `{PAID, SHIPPED, DELIVERED}`.
+          * `404` -- order does not exist.
+          * `409` -- current status no longer matches `priorStatus` (raced).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateShippingAddressRequest"
+      responses:
+        "204":
+          description: Shipping address updated. Empty body.
+
 components:
   securitySchemes:
     cookieAuth:
@@ -169,6 +225,118 @@ components:
         pattern: "^ORD-\\d{8}-[A-Z0-9]{10}$"
       example: ORD-20260612-A1B2C3D4E5
 
+    OrderStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Filter to orders whose `status` matches exactly.
+      schema:
+        $ref: "#/components/schemas/OrderStatus"
+      example: PAID
+
+    OrderNumberFilter:
+      name: orderNumber
+      in: query
+      required: false
+      description: Case-insensitive substring match against `order_number`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 23
+      example: "20260612"
+
+    OrderAmountMinFilter:
+      name: amountMin
+      in: query
+      required: false
+      description: Returns orders with `totalPrice >= amountMin`.
+      schema:
+        type: number
+        minimum: 0
+      example: 50.00
+
+    OrderAmountMaxFilter:
+      name: amountMax
+      in: query
+      required: false
+      description: Returns orders with `totalPrice <= amountMax`.
+      schema:
+        type: number
+        minimum: 0
+      example: 500.00
+
+    OrderDateFromFilter:
+      name: dateFrom
+      in: query
+      required: false
+      description: Returns orders with `createdAt >= dateFrom` (inclusive, ISO date `YYYY-MM-DD`).
+      schema:
+        type: string
+        format: date
+      example: "2026-04-01"
+
+    OrderDateToFilter:
+      name: dateTo
+      in: query
+      required: false
+      description: Returns orders with `createdAt <= dateTo` (inclusive, ISO date `YYYY-MM-DD`).
+      schema:
+        type: string
+        format: date
+      example: "2026-04-30"
+
+    OrderSortField:
+      name: sortField
+      in: query
+      required: false
+      description: Sort column. When omitted the server sorts by `createdAt` descending.
+      schema:
+        type: string
+        enum: [date, total]
+      example: date
+
+    OrderSortDirection:
+      name: sortDirection
+      in: query
+      required: false
+      description: Sort direction. Defaults to `desc`.
+      schema:
+        type: string
+        enum: [asc, desc]
+      example: desc
+
+    PageNumber:
+      name: page
+      in: query
+      required: false
+      description: Zero-based page index.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+      example: 0
+
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Items per page.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+      example: 10
+
+    OrderCustomerFilter:
+      name: customer
+      in: query
+      required: false
+      description: Case-insensitive substring match against the owning user's `firstName`, `lastName`, `email`, and the concatenated `firstName lastName` / `lastName firstName`, so a query like `Liran Bat` finds the user. Trimmed; empty after trim is ignored.
+      schema:
+        type: string
+        maxLength: 200
+      example: jane
+
   schemas:
     OrderStatus:
       type: string
@@ -188,6 +356,26 @@ components:
       enum: [SUCCESS, REFUNDED]
       example: SUCCESS
 
+    UpdateOrderStatusRequest:
+      type: object
+      description: Body for `POST /api/admin/orders/{orderNumber}/update-status`. `priorStatus` is the status the client observed when opening the modal and is used as the optimistic-concurrency anchor.
+      required: [targetStatus, priorStatus]
+      properties:
+        targetStatus:
+          $ref: "#/components/schemas/OrderStatus"
+        priorStatus:
+          $ref: "#/components/schemas/OrderStatus"
+
+    UpdateShippingAddressRequest:
+      type: object
+      description: Body for `POST /api/admin/orders/{orderNumber}/update-shipping`. `shipping` carries the full replacement address (all six fields required, same validation as checkout). `priorStatus` is the status the client observed when opening the form and is used as the optimistic-concurrency anchor.
+      required: [shipping, priorStatus]
+      properties:
+        shipping:
+          $ref: "#/components/schemas/OrderShipping"
+        priorStatus:
+          $ref: "#/components/schemas/OrderStatus"
+
     OrderSummary:
       type: object
       description: One row on the Order History list.
@@ -197,6 +385,7 @@ components:
         - createdAt
         - itemCount
         - totalPrice
+        - customer
       properties:
         orderNumber:
           type: string
@@ -222,6 +411,8 @@ components:
           minimum: 0
           description: Sum of the order's line totals.
           example: 419.00
+        customer:
+          $ref: "#/components/schemas/CustomerForOrder"
 
     OrderListPage:
       type: object
@@ -257,6 +448,27 @@ components:
           minimum: 0
           description: Total pages at the current `pageSize`.
           example: 3
+
+    CustomerForOrder:
+      type: object
+      description: Owning user's identity.
+      required: [id, firstName, lastName, email]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1
+        firstName:
+          type: string
+          example: Liran
+        lastName:
+          type: string
+          example: Bat
+        email:
+          type: string
+          format: email
+          example: liran.bat@example.com
 
     OrderItem:
       type: object
@@ -409,6 +621,7 @@ components:
         - items
         - shipping
         - payment
+        - customer
       properties:
         orderNumber:
           type: string
@@ -450,3 +663,5 @@ components:
           $ref: "#/components/schemas/OrderShipping"
         payment:
           $ref: "#/components/schemas/OrderPayment"
+        customer:
+          $ref: "#/components/schemas/CustomerForOrder"
