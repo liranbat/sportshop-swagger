@@ -124,6 +124,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderDetail"
 
+  /api/admin/orders/{orderNumber}/cancel:
+    post:
+      operationId: cancelAdminOrder
+      tags: [Admin Orders]
+      summary: Cancel any order (admin)
+      description: |
+        Cancels any order in `{PAID, SHIPPED, DELIVERED}` regardless of owning user. Atomically flips the order to `CANCELLED_BY_ADMIN`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}` to render the new state.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at`; the original `cancelled_by` column is left untouched (`cancelled_by` is reserved for user-initiated cancellations).
+
+        Responses:
+          * `204` -- order cancelled.
+          * `404` -- order does not exist.
+          * `409` -- order found but no longer cancellable (already cancelled, already `DONE`, etc.).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "204":
+          description: Order cancelled. Empty body.
+
 components:
   securitySchemes:
     cookieAuth:
