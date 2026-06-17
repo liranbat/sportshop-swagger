@@ -132,7 +132,7 @@ paths:
       description: |
         Cancels any order in `{PAID, SHIPPED, DELIVERED}` regardless of owning user. Atomically flips the order to `CANCELLED_BY_ADMIN`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}` to render the new state.
 
-        Attribution: the acting admin is recorded on `updated_by` / `updated_at`; the original `cancelled_by` column is left untouched (`cancelled_by` is reserved for user-initiated cancellations).
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at` and on `cancelled_by`; the `status` value (`CANCELLED_BY_ADMIN` vs. `CANCELLED_BY_USER`) is what distinguishes the initiator.
 
         Responses:
           * `204` -- order cancelled.
@@ -145,6 +145,35 @@ paths:
       responses:
         "204":
           description: Order cancelled. Empty body.
+
+  /api/admin/orders/{orderNumber}/update-status:
+    post:
+      operationId: updateAdminOrderStatus
+      tags: [Admin Orders]
+      summary: Change an order's fulfillment status (admin)
+      description: |
+        Atomically moves an order along the lifecycle state machine: `PAID` ↔ `SHIPPED` ↔ `DELIVERED`, plus the skip `PAID` ↔ `DELIVERED` and one-way `→ DONE` from any of `PAID` / `SHIPPED` / `DELIVERED`. No transitions out of `DONE` / `CANCELLED_*`, no self-loops. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at`.
+
+        Responses:
+          * `204` -- status updated.
+          * `400` -- `priorStatus → targetStatus` is not a legal transition.
+          * `404` -- order does not exist.
+          * `409` -- current status no longer matches `priorStatus` (raced).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderStatusRequest"
+      responses:
+        "204":
+          description: Status updated. Empty body.
 
 components:
   securitySchemes:
@@ -297,6 +326,16 @@ components:
       description: Payment lifecycle status.
       enum: [SUCCESS, REFUNDED]
       example: SUCCESS
+
+    UpdateOrderStatusRequest:
+      type: object
+      description: Body for `POST /api/admin/orders/{orderNumber}/update-status`. `priorStatus` is the status the client observed when opening the modal and is used as the optimistic-concurrency anchor.
+      required: [targetStatus, priorStatus]
+      properties:
+        targetStatus:
+          $ref: "#/components/schemas/OrderStatus"
+        priorStatus:
+          $ref: "#/components/schemas/OrderStatus"
 
     OrderSummary:
       type: object
