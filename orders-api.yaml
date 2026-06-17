@@ -106,6 +106,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderListPage"
 
+  /api/admin/orders/{orderNumber}:
+    get:
+      operationId: getAdminOrder
+      tags: [Admin Orders]
+      summary: Get any order's full detail (admin)
+      description: Returns the order header, line items, shipping address, payment row, and the owning customer's identity — regardless of who placed the order. Returns `404` only when the order number does not exist; cross-user reads are permitted.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      responses:
+        "200":
+          description: Order detail payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderDetail"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -503,6 +521,7 @@ components:
         - items
         - shipping
         - payment
+        - customer
       properties:
         orderNumber:
           type: string
@@ -544,3 +563,5 @@ components:
           $ref: "#/components/schemas/OrderShipping"
         payment:
           $ref: "#/components/schemas/OrderPayment"
+        customer:
+          $ref: "#/components/schemas/CustomerForOrder"
