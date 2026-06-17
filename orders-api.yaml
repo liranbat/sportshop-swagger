@@ -175,6 +175,35 @@ paths:
         "204":
           description: Status updated. Empty body.
 
+  /api/admin/orders/{orderNumber}/update-shipping:
+    post:
+      operationId: updateAdminOrderShipping
+      tags: [Admin Orders]
+      summary: Edit an order's shipping address (admin)
+      description: |
+        Replaces the shipping address on an order whose status is one of `{PAID, SHIPPED, DELIVERED}`. All six `shipping` fields are required and validated against the same rules as checkout. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+
+        Attribution: the acting admin is recorded on `updated_by` / `updated_at`. `cancelled_by` / `cancelled_at` are untouched.
+
+        Responses:
+          * `204` -- shipping address updated.
+          * `400` -- request body fails validation, or `priorStatus` is not one of `{PAID, SHIPPED, DELIVERED}`.
+          * `404` -- order does not exist.
+          * `409` -- current status no longer matches `priorStatus` (raced).
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderNumberPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateShippingAddressRequest"
+      responses:
+        "204":
+          description: Shipping address updated. Empty body.
+
 components:
   securitySchemes:
     cookieAuth:
@@ -334,6 +363,16 @@ components:
       properties:
         targetStatus:
           $ref: "#/components/schemas/OrderStatus"
+        priorStatus:
+          $ref: "#/components/schemas/OrderStatus"
+
+    UpdateShippingAddressRequest:
+      type: object
+      description: Body for `POST /api/admin/orders/{orderNumber}/update-shipping`. `shipping` carries the full replacement address (all six fields required, same validation as checkout). `priorStatus` is the status the client observed when opening the form and is used as the optimistic-concurrency anchor.
+      required: [shipping, priorStatus]
+      properties:
+        shipping:
+          $ref: "#/components/schemas/OrderShipping"
         priorStatus:
           $ref: "#/components/schemas/OrderStatus"
 
