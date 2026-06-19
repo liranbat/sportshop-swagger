@@ -185,8 +185,8 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Server-composed relative URL of the product image (e.g. `/images/products/basketball-spalding.jpg`); `null` if no image uploaded.
-          example: /images/products/basketball-spalding.jpg
+          description: Absolute URL of the product image; treat as opaque. `null` if no image uploaded.
+          example: http://localhost:8080/images/products/basketball-spalding.jpg
         price:
           type: number
           minimum: 0
