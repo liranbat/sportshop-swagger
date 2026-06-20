@@ -2,8 +2,8 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Categories API
-  description: Read-only categories surface for the home page carousel.
-  version: 0.1.0
+  description: Categories for the home-page carousel + admin CRUD on the same resource.
+  version: 0.2.0
 
 servers:
   - url: http://localhost:8080
@@ -12,27 +12,19 @@ servers:
 tags:
   - name: Categories
     description: Home-page product categories
+  - name: Admin Categories
+    description: Admin CRUD on categories (list incl. deleted, create, edit, soft-delete, restore)
 
 paths:
   /api/categories:
     get:
       operationId: listCategories
       tags: [Categories]
-      summary: List categories
-      description: Returns categories ordered alphabetically by name. Filter with `active` to scope the result set.
-      parameters:
-        - name: active
-          in: query
-          required: false
-          description: |
-            `true` returns non-deleted rows only, `false` returns soft-deleted only,
-            omitted returns every row.
-          schema:
-            type: boolean
-          example: true
+      summary: List active categories
+      description: Returns non-deleted categories ordered alphabetically by name.
       responses:
         "200":
-          description: List of categories matching the filter (may be empty).
+          description: List of active categories (may be empty).
           content:
             application/json:
               schema:
@@ -40,11 +32,159 @@ paths:
                 items:
                   $ref: "#/components/schemas/Category"
 
+  /api/admin/categories:
+    get:
+      operationId: listAdminCategories
+      tags: [Admin Categories]
+      summary: List all categories (admin)
+      description: Returns every category, ordered `name ASC, id ASC`. Includes soft-deleted rows.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of categories (may be empty).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      operationId: createAdminCategory
+      tags: [Admin Categories]
+      summary: Create a category
+      description: |
+        Inserts a new category. Last-writer-wins; duplicate names are allowed.
+        - 200 — created; response is the new row.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryWriteRequest"
+      responses:
+        "200":
+          description: Category created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /api/admin/categories/{id}:
+    put:
+      operationId: updateAdminCategory
+      tags: [Admin Categories]
+      summary: Edit a category
+      description: |
+        Updates the category's name and/or icon. Edits are allowed on soft-deleted rows; the deletion flag itself is not affected. Last-writer-wins.
+        - 200 — updated; response is the new row.
+        - 404 — category not found.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target category id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryWriteRequest"
+      responses:
+        "200":
+          description: Category updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /api/admin/categories/{id}/delete:
+    post:
+      operationId: softDeleteAdminCategory
+      tags: [Admin Categories]
+      summary: Soft-delete a category and reassign its products
+      description: |
+        In a single transaction: bulk-reassigns every product (active + archived) currently in the target category to the chosen replacement, then sets `isDeleted = true` on the target. Restore later un-hides the row but does NOT reverse the product reassignment — the category comes back as an empty bucket.
+        - 200 — soft-deleted; response is the updated target row.
+        - 400 — replacement is the same as the target, missing, or already soft-deleted.
+        - 404 — target category not found.
+        - 409 — `"This category is already deleted — another admin already deleted it."`
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target category id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategorySoftDeleteRequest"
+      responses:
+        "200":
+          description: Category soft-deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /api/admin/categories/{id}/restore:
+    post:
+      operationId: restoreAdminCategory
+      tags: [Admin Categories]
+      summary: Restore a soft-deleted category
+      description: |
+        Clears `is_deleted` / `deleted_at` / `deleted_by`. Conditional on the target currently being soft-deleted.
+        - 200 — restored; response is the updated row.
+        - 404 — category not found.
+        - 409 — `"This category is no longer deleted — another admin already restored it."`
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target category id.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        "200":
+          description: Category restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: ACCESS_TOKEN
+
   schemas:
     Category:
       type: object
-      required: [id, name, icon]
+      required: [id, name, icon, isDeleted, createdAt]
       properties:
         id:
           type: integer
@@ -61,3 +201,65 @@ components:
           nullable: true
           description: Absolute URL of the category icon; treat as opaque. `null` if no icon uploaded.
           example: http://localhost:8080/images/categories/soccer.svg
+        isDeleted:
+          type: boolean
+          description: Soft-deleted rows only appear on the admin list path.
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          description: When the category was created. Stamped by the database at INSERT time.
+          example: "2026-04-12T09:31:18Z"
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the category was soft-deleted; `null` while active.
+          example: "2026-04-12T09:31:18Z"
+        deletedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Admin user id who soft-deleted the category; `null` while active.
+          example: 7
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last admin write timestamp; `null` for unmodified seed rows.
+          example: "2026-04-12T09:31:18Z"
+        updatedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Admin user id of the last writer; `null` for unmodified seed rows.
+          example: 7
+
+    CategoryWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Soccer
+        icon:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: |
+            Absolute icon URL produced by `POST /api/admin/images/categories`. `null` clears the icon.
+            The server validates the URL prefix and stores the trailing filename only.
+          example: http://localhost:8080/images/categories/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.svg
+
+    CategorySoftDeleteRequest:
+      type: object
+      required: [replacementCategoryId]
+      properties:
+        replacementCategoryId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Active category that will receive the deleted category's products. Must exist and have `isDeleted = false`. Cannot equal the target category id.
+          example: 2
