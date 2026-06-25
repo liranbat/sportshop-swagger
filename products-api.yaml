@@ -3,7 +3,7 @@ openapi: 3.0.3
 info:
   title: Sportshop Products API
   description: Catalog products for the user-facing catalog/detail pages + admin CRUD on the same resource.
-  version: 0.4.0
+  version: 0.5.0
 
 servers:
   - url: http://localhost:8080
@@ -96,6 +96,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProductPage"
+    post:
+      operationId: createAdminProduct
+      tags: [Admin Products]
+      summary: Create a product
+      description: |
+        Inserts a product and its initial `product_stock` rows in one transaction. Returns the full
+        `ProductDetail` so the post-create redirect can render without a second round-trip.
+        - `400` — validation (negative quantity, multi-size key rules, bad `imageUrl` prefix, unknown `categoryId`).
+        - `409` — `categoryId` was soft-deleted between picker load and save.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateRequest"
+      responses:
+        "200":
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
 
 components:
   securitySchemes:
@@ -351,6 +375,73 @@ components:
               * `IN_STOCK`     otherwise.
           enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK]
           example: IN_STOCK
+    ProductCreateRequest:
+      type: object
+      description: Request body for `POST /api/admin/products`.
+      required: [name, categoryId, isMultiSize, price, stockBySize]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Marketing copy. `null` clears the field.
+          example: Official-size indoor/outdoor basketball with composite leather grip.
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: FK to an active (non-deleted) `Category.id`.
+          example: 1
+        isMultiSize:
+          type: boolean
+          description: |
+            `false` → `stockBySize` MUST be exactly one entry keyed `"ONE_SIZE"`.
+            `true` → `stockBySize` MUST be ≥1 entries and MUST NOT use `"ONE_SIZE"`.
+          example: false
+        imageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
+        price:
+          type: number
+          minimum: 0
+          description: Two decimal places.
+          example: 29.99
+        stockBySize:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: "#/components/schemas/ProductStockEntry"
+          description: Initial per-size stock rows; one `product_stock` row per entry.
+          example:
+            ONE_SIZE:
+              quantity: 25
+              lowStockThreshold: 5
+    ProductStockEntry:
+      type: object
+      description: Per-size stock row at create time.
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Initial on-hand quantity; `0` allowed.
+          example: 25
+        lowStockThreshold:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: Low-stock when `quantity <= lowStockThreshold`; `null` opts out.
+          example: 5
     ProductPage:
       type: object
       description: Paged envelope returned by `GET /api/products`. `page` and `pageSize` echo the request; `totalElements` and `totalPages` describe the full filtered set.
