@@ -3,7 +3,7 @@ openapi: 3.0.3
 info:
   title: Sportshop Products API
   description: Catalog products for the user-facing catalog/detail pages + admin CRUD on the same resource.
-  version: 0.5.0
+  version: 0.6.0
 
 servers:
   - url: http://localhost:8080
@@ -56,8 +56,10 @@ paths:
         Single-size SKUs (`isMultiSize = false`) return exactly one entry whose
         `size` is `ONE_SIZE`. Multi-size SKUs return one entry per stocked size.
 
-        Returns `404` when the product does not exist or has been archived
-        (`is_archived = true`).
+        Archived products are returned only to admins (with `isArchived = true`)
+        so they can land on the admin detail page directly. Non-admin callers
+        (including anonymous) get `404` for archived products — same response
+        shape as a non-existent id.
       parameters:
         - $ref: "#/components/parameters/ProductIdPath"
       responses:
@@ -116,6 +118,93 @@ paths:
       responses:
         "200":
           description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}:
+    put:
+      operationId: updateAdminProduct
+      tags: [Admin Products]
+      summary: Update a product
+      description: |
+        Updates editable fields. Optimistic-locked on `version`. Flipping `isMultiSize` cascades
+        `product_stock` in the same transaction (wipe all; insert one `ONE_SIZE` row at qty 0 when the
+        new value is `false`).
+        - `400` — validation (bad `imageUrl`, missing required field).
+        - `404` — product not found.
+        - `409` — version mismatch OR `categoryId` was soft-deleted between load and save.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateRequest"
+      responses:
+        "200":
+          description: Product updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}/archive:
+    post:
+      operationId: archiveAdminProduct
+      tags: [Admin Products]
+      summary: Archive a product
+      description: |
+        Hides the product from the user-facing catalog/detail surfaces (admin-only listing still shows
+        it). Optimistic-locked: the UPDATE matches only when `is_archived = FALSE AND version =
+        :loaded_version`. The `version` is bumped so live carts re-validate at checkout.
+        - `404` — no product with this id.
+        - `409` — already archived OR version mismatch.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLifecycleRequest"
+      responses:
+        "200":
+          description: Product archived.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}/restore:
+    post:
+      operationId: restoreAdminProduct
+      tags: [Admin Products]
+      summary: Restore an archived product
+      description: |
+        Unarchives the product; it reappears on user-facing surfaces. Optimistic-locked: the UPDATE
+        matches only when `is_archived = TRUE AND version = :loaded_version`. The `version` is bumped.
+        - `404` — no product with this id.
+        - `409` — already active OR version mismatch.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLifecycleRequest"
+      responses:
+        "200":
+          description: Product restored.
           content:
             application/json:
               schema:
@@ -294,8 +383,10 @@ components:
         isArchived:
           type: boolean
           description: |
-            `true` when the product has been archived (hidden from `/api/products` and `/api/products/{id}`,
-            still visible to admins through `/api/admin/products`). User-facing endpoints always return `false`.
+            `true` when the product has been archived. Hidden from non-admin surfaces — `/api/products`
+            (list) excludes archived rows, and `/api/products/{id}` (detail) returns `404` for archived
+            products when the caller is not an admin. Admins see archived products via
+            `/api/admin/products` and via the same `/api/products/{id}` path.
           example: false
         updatedAt:
           type: string
@@ -424,6 +515,64 @@ components:
             ONE_SIZE:
               quantity: 25
               lowStockThreshold: 5
+    ProductUpdateRequest:
+      type: object
+      description: Body for `PUT /api/admin/products/{id}`. Stock cascade on `isMultiSize` flip is described on the endpoint.
+      required: [name, categoryId, isMultiSize, price, version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Marketing copy. `null` clears the field.
+          example: Official-size indoor/outdoor basketball with composite leather grip.
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: FK to an active (non-deleted) `Category.id`.
+          example: 1
+        isMultiSize:
+          type: boolean
+          description: |
+            Flipping this resets `product_stock` for the product in the same transaction. See the
+            endpoint description for the cascade rules.
+          example: false
+        imageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
+        price:
+          type: number
+          minimum: 0
+          description: Two decimal places.
+          example: 29.99
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The `version` the client loaded; mismatch on commit yields `409`.
+          example: 3
+    ProductLifecycleRequest:
+      type: object
+      description: |
+        Request body for archive/restore endpoints. Only the `version` the client loaded is needed;
+        the action itself is implied by the path segment.
+      required: [version]
+      properties:
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The `version` the client loaded; mismatch on commit yields `409`.
+          example: 3
     ProductStockEntry:
       type: object
       description: Per-size stock row at create time.
