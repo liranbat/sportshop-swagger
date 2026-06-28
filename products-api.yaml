@@ -83,6 +83,7 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/ProductArchiveStatusFilterParam"
+        - $ref: "#/components/parameters/ProductIsMultiSizeFilter"
         - $ref: "#/components/parameters/ProductSearchFilter"
         - $ref: "#/components/parameters/ProductCategoryIdsFilter"
         - $ref: "#/components/parameters/ProductPriceMinFilter"
@@ -334,6 +335,15 @@ components:
       schema:
         $ref: "#/components/schemas/ProductArchiveStatusFilter"
       example: ACTIVE
+
+    ProductIsMultiSizeFilter:
+      name: isMultiSize
+      in: query
+      required: false
+      description: When set, narrows to products with the given `isMultiSize` value. Omit the param to include both single-size and multi-size products.
+      schema:
+        type: boolean
+      example: true
 
   schemas:
     Product:
