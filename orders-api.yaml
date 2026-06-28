@@ -497,8 +497,8 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Product image URL at order time; `null` when no image was attached.
-          example: /images/products/basketball-spalding.jpg
+          description: Absolute product image URL captured at order time; treat as opaque. `null` when no image was attached.
+          example: http://localhost:8080/images/products/basketball-spalding.jpg
         size:
           type: string
           minLength: 1

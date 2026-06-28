@@ -229,8 +229,8 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Live `products.image_url`; `null` if no image.
-          example: /images/products/basketball-spalding.jpg
+          description: Absolute URL derived from live `products.image_url`; treat as opaque. `null` if no image.
+          example: http://localhost:8080/images/products/basketball-spalding.jpg
         productPrice:
           type: number
           minimum: 0
