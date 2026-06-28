@@ -2,8 +2,8 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Products API
-  description: Read-only products surface for the catalog page and product details page.
-  version: 0.3.0
+  description: Catalog products for the user-facing catalog/detail pages + admin CRUD on the same resource.
+  version: 0.6.0
 
 servers:
   - url: http://localhost:8080
@@ -12,103 +12,28 @@ servers:
 tags:
   - name: Products
     description: Catalog products
+  - name: Admin Products
+    description: Admin list of products (includes archived)
 
 paths:
   /api/products:
     get:
       operationId: listProducts
       tags: [Products]
-      summary: List products
+      summary: List active products
       description: |
-        Returns a page of products matching the filter and sort criteria. All filter and sort
-        query parameters are optional and combine with AND semantics. The response is an
+        Returns a page of non-archived products matching the filter and sort criteria. All filter
+        and sort query parameters are optional and combine with AND semantics. The response is an
         envelope (`ProductPage`) with the items array plus pagination metadata.
       parameters:
-        - name: active
-          in: query
-          required: false
-          description: |
-            `true` returns non-archived rows only, `false` returns archived only,
-            omitted returns every row.
-          schema:
-            type: boolean
-          example: true
-        - name: search
-          in: query
-          required: false
-          description: Case-insensitive substring match on `name`. Whitespace-trimmed server-side; empty after trim is treated as no filter.
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 200
-          example: spalding
-        - name: categoryIds
-          in: query
-          required: false
-          description: Filter to products whose `categoryId` is in the set. Serialized as comma-joined values (`?categoryIds=1,2,3`).
-          style: form
-          explode: false
-          schema:
-            type: array
-            items:
-              type: integer
-              format: int64
-          example: [1, 2]
-        - name: priceMin
-          in: query
-          required: false
-          description: Returns products with `price >= priceMin`.
-          schema:
-            type: number
-            minimum: 0
-          example: 10.00
-        - name: priceMax
-          in: query
-          required: false
-          description: Returns products with `price <= priceMax`. If `priceMax < priceMin`, the request succeeds and returns an empty list.
-          schema:
-            type: number
-            minimum: 0
-          example: 100.00
-        - name: sortField
-          in: query
-          required: false
-          description: Sort column. When omitted or empty, the backend sorts by `id` ascending (stable insertion order).
-          schema:
-            type: string
-            enum: [name, price, category]
-          example: name
-        - name: sortDirection
-          in: query
-          required: false
-          description: Sort direction. Ignored unless `sortField` is supplied. Defaults to `asc`.
-          schema:
-            type: string
-            enum: [asc, desc]
-          example: asc
-        - name: page
-          in: query
-          required: false
-          description: |
-            Zero-based page index (the first page is `0`, matching Spring Data JPA's native
-            convention). The controller defaults the value when omitted. Pages past the end
-            return an empty `items` array with the correct `totalElements` / `totalPages`.
-          schema:
-            type: integer
-            format: int32
-            minimum: 0
-          example: 0
-        - name: pageSize
-          in: query
-          required: false
-          description: |
-            Items per page. The UI exposes `[4, 9, 16, 25]`; any positive integer is accepted
-            for API parity. The controller defaults the value when omitted.
-          schema:
-            type: integer
-            format: int32
-            minimum: 1
-          example: 9
+        - $ref: "#/components/parameters/ProductSearchFilter"
+        - $ref: "#/components/parameters/ProductCategoryIdsFilter"
+        - $ref: "#/components/parameters/ProductPriceMinFilter"
+        - $ref: "#/components/parameters/ProductPriceMaxFilter"
+        - $ref: "#/components/parameters/ProductSortField"
+        - $ref: "#/components/parameters/ProductSortDirection"
+        - $ref: "#/components/parameters/ProductPageNumber"
+        - $ref: "#/components/parameters/ProductPageSize"
       responses:
         "200":
           description: Page of products matching the filter (may be empty).
@@ -131,18 +56,12 @@ paths:
         Single-size SKUs (`isMultiSize = false`) return exactly one entry whose
         `size` is `ONE_SIZE`. Multi-size SKUs return one entry per stocked size.
 
-        Returns `404` when the product does not exist or has been archived
-        (`is_archived = true`).
+        Archived products are returned only to admins (with `isArchived = true`)
+        so they can land on the admin detail page directly. Non-admin callers
+        (including anonymous) get `404` for archived products — same response
+        shape as a non-existent id.
       parameters:
-        - name: id
-          in: path
-          required: true
-          description: Product identifier (matches `Product.id`).
-          schema:
-            type: integer
-            format: int64
-            minimum: 1
-          example: 1
+        - $ref: "#/components/parameters/ProductIdPath"
       responses:
         "200":
           description: Product detail payload.
@@ -151,11 +70,285 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductDetail"
 
+  /api/admin/products:
+    get:
+      operationId: listAdminProducts
+      tags: [Admin Products]
+      summary: List all products (admin)
+      description: |
+        Returns a page of products including archived. Use `archiveStatus=ACTIVE|ARCHIVED` to
+        narrow; omit the param to return both. `id asc` is appended to every emitted ORDER BY
+        as a deterministic tie-break.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductArchiveStatusFilterParam"
+        - $ref: "#/components/parameters/ProductIsMultiSizeFilter"
+        - $ref: "#/components/parameters/ProductSearchFilter"
+        - $ref: "#/components/parameters/ProductCategoryIdsFilter"
+        - $ref: "#/components/parameters/ProductPriceMinFilter"
+        - $ref: "#/components/parameters/ProductPriceMaxFilter"
+        - $ref: "#/components/parameters/AdminProductSortField"
+        - $ref: "#/components/parameters/ProductSortDirection"
+        - $ref: "#/components/parameters/ProductPageNumber"
+        - $ref: "#/components/parameters/ProductPageSize"
+      responses:
+        "200":
+          description: Page of products (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPage"
+    post:
+      operationId: createAdminProduct
+      tags: [Admin Products]
+      summary: Create a product
+      description: |
+        Inserts a product and its initial `product_stock` rows in one transaction. Returns the full
+        `ProductDetail` so the post-create redirect can render without a second round-trip.
+        - `400` — validation (negative quantity, multi-size key rules, bad `imageUrl` prefix, unknown `categoryId`).
+        - `409` — `categoryId` was soft-deleted between picker load and save.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateRequest"
+      responses:
+        "200":
+          description: Product created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}:
+    put:
+      operationId: updateAdminProduct
+      tags: [Admin Products]
+      summary: Update a product
+      description: |
+        Updates editable fields. Optimistic-locked on `version`. Flipping `isMultiSize` cascades
+        `product_stock` in the same transaction (wipe all; insert one `ONE_SIZE` row at qty 0 when the
+        new value is `false`).
+        - `400` — validation (bad `imageUrl`, missing required field).
+        - `404` — product not found.
+        - `409` — version mismatch OR `categoryId` was soft-deleted between load and save.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateRequest"
+      responses:
+        "200":
+          description: Product updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}/archive:
+    post:
+      operationId: archiveAdminProduct
+      tags: [Admin Products]
+      summary: Archive a product
+      description: |
+        Hides the product from the user-facing catalog/detail surfaces (admin-only listing still shows
+        it). Optimistic-locked: the UPDATE matches only when `is_archived = FALSE AND version =
+        :loaded_version`. The `version` is bumped so live carts re-validate at checkout.
+        - `404` — no product with this id.
+        - `409` — already archived OR version mismatch.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLifecycleRequest"
+      responses:
+        "200":
+          description: Product archived.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
+  /api/admin/products/{id}/restore:
+    post:
+      operationId: restoreAdminProduct
+      tags: [Admin Products]
+      summary: Restore an archived product
+      description: |
+        Unarchives the product; it reappears on user-facing surfaces. Optimistic-locked: the UPDATE
+        matches only when `is_archived = TRUE AND version = :loaded_version`. The `version` is bumped.
+        - `404` — no product with this id.
+        - `409` — already active OR version mismatch.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductLifecycleRequest"
+      responses:
+        "200":
+          description: Product restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductDetail"
+
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: ACCESS_TOKEN
+
+  parameters:
+    ProductIdPath:
+      name: id
+      in: path
+      required: true
+      description: Product identifier (matches `Product.id`).
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+      example: 1
+
+    ProductSearchFilter:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on `name`. Whitespace-trimmed server-side; empty after trim is treated as no filter.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+      example: spalding
+
+    ProductCategoryIdsFilter:
+      name: categoryIds
+      in: query
+      required: false
+      description: Filter to products whose `categoryId` is in the set. Serialized as comma-joined values (`?categoryIds=1,2,3`).
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: integer
+          format: int64
+      example: [1, 2]
+
+    ProductPriceMinFilter:
+      name: priceMin
+      in: query
+      required: false
+      description: Returns products with `price >= priceMin`.
+      schema:
+        type: number
+        minimum: 0
+      example: 10.00
+
+    ProductPriceMaxFilter:
+      name: priceMax
+      in: query
+      required: false
+      description: Returns products with `price <= priceMax`. If `priceMax < priceMin`, the request succeeds and returns an empty list.
+      schema:
+        type: number
+        minimum: 0
+      example: 100.00
+
+    ProductSortField:
+      name: sortField
+      in: query
+      required: false
+      description: Sort column. When omitted the server sorts by `id` ascending.
+      schema:
+        type: string
+        enum: [name, price, category]
+      example: name
+
+    AdminProductSortField:
+      name: sortField
+      in: query
+      required: false
+      description: Sort column. When omitted the server sorts by `id` ascending.
+      schema:
+        type: string
+        enum: [name, price, category, updatedAt]
+      example: updatedAt
+
+    ProductSortDirection:
+      name: sortDirection
+      in: query
+      required: false
+      description: Sort direction. Ignored unless `sortField` is supplied. Defaults to `asc`.
+      schema:
+        type: string
+        enum: [asc, desc]
+      example: asc
+
+    ProductPageNumber:
+      name: page
+      in: query
+      required: false
+      description: Zero-based page index. The controller defaults the value when omitted.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+      example: 0
+
+    ProductPageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Items per page. The UI exposes `[4, 9, 16, 25]`; any positive integer is accepted. The controller defaults the value when omitted.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+      example: 9
+
+    ProductArchiveStatusFilterParam:
+      name: archiveStatus
+      in: query
+      required: false
+      description: Archive-state filter. Omit the param entirely for "no archive filter" (the UI's "All" sentinel) — both active and archived products are returned.
+      schema:
+        $ref: "#/components/schemas/ProductArchiveStatusFilter"
+      example: ACTIVE
+
+    ProductIsMultiSizeFilter:
+      name: isMultiSize
+      in: query
+      required: false
+      description: When set, narrows to products with the given `isMultiSize` value. Omit the param to include both single-size and multi-size products.
+      schema:
+        type: boolean
+      example: true
+
   schemas:
     Product:
       type: object
-      required: [id, name, isMultiSize, price, version]
+      required: [id, name, isMultiSize, price, version, isArchived]
       properties:
         id:
           type: integer
@@ -185,8 +378,8 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Server-composed relative URL of the product image (e.g. `/images/products/basketball-spalding.jpg`); `null` if no image uploaded.
-          example: /images/products/basketball-spalding.jpg
+          description: Absolute URL of the product image; treat as opaque. `null` if no image uploaded.
+          example: http://localhost:8080/images/products/basketball-spalding.jpg
         price:
           type: number
           minimum: 0
@@ -197,6 +390,45 @@ components:
           format: int32
           description: Optimistic-locking stamp; bumped on every successful update.
           example: 1
+        isArchived:
+          type: boolean
+          description: |
+            `true` when the product has been archived. Hidden from non-admin surfaces — `/api/products`
+            (list) excludes archived rows, and `/api/products/{id}` (detail) returns `404` for archived
+            products when the caller is not an admin. Admins see archived products via
+            `/api/admin/products` and via the same `/api/products/{id}` path.
+          example: false
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last-update timestamp. `null` until the first update after creation.
+          example: 2026-06-23T15:42:11+03:00
+        updatedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Id of the admin who last updated this product. `null` until the first update after creation.
+          example: 1
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp at which the product was archived. `null` while `isArchived = false`.
+          example: 2026-06-23T15:42:11+03:00
+        archivedBy:
+          type: integer
+          format: int64
+          nullable: true
+          description: Id of the admin who archived this product. `null` while `isArchived = false`.
+          example: 1
+    ProductArchiveStatusFilter:
+      type: string
+      description: Archive-state filter for the admin product list. Omit the param entirely for "no archive filter" (the UI's "All" sentinel) — both active and archived products are returned.
+      enum:
+        - ACTIVE
+        - ARCHIVED
+      example: ACTIVE
     ProductDetail:
       description: |
         Aggregated payload for the Product Details page. Wraps a `Product` with
@@ -244,6 +476,131 @@ components:
               * `IN_STOCK`     otherwise.
           enum: [IN_STOCK, LOW_STOCK, OUT_OF_STOCK]
           example: IN_STOCK
+    ProductCreateRequest:
+      type: object
+      description: Request body for `POST /api/admin/products`.
+      required: [name, categoryId, isMultiSize, price, stockBySize]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Marketing copy. `null` clears the field.
+          example: Official-size indoor/outdoor basketball with composite leather grip.
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: FK to an active (non-deleted) `Category.id`.
+          example: 1
+        isMultiSize:
+          type: boolean
+          description: |
+            `false` → `stockBySize` MUST be exactly one entry keyed `"ONE_SIZE"`.
+            `true` → `stockBySize` MUST be ≥1 entries and MUST NOT use `"ONE_SIZE"`.
+          example: false
+        imageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
+        price:
+          type: number
+          minimum: 0
+          description: Two decimal places.
+          example: 29.99
+        stockBySize:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            $ref: "#/components/schemas/ProductStockEntry"
+          description: Initial per-size stock rows; one `product_stock` row per entry.
+          example:
+            ONE_SIZE:
+              quantity: 25
+              lowStockThreshold: 5
+    ProductUpdateRequest:
+      type: object
+      description: Body for `PUT /api/admin/products/{id}`. Stock cascade on `isMultiSize` flip is described on the endpoint.
+      required: [name, categoryId, isMultiSize, price, version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Spalding NBA Basketball
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Marketing copy. `null` clears the field.
+          example: Official-size indoor/outdoor basketball with composite leather grip.
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: FK to an active (non-deleted) `Category.id`.
+          example: 1
+        isMultiSize:
+          type: boolean
+          description: |
+            Flipping this resets `product_stock` for the product in the same transaction. See the
+            endpoint description for the cascade rules.
+          example: false
+        imageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
+        price:
+          type: number
+          minimum: 0
+          description: Two decimal places.
+          example: 29.99
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The `version` the client loaded; mismatch on commit yields `409`.
+          example: 3
+    ProductLifecycleRequest:
+      type: object
+      description: |
+        Request body for archive/restore endpoints. Only the `version` the client loaded is needed;
+        the action itself is implied by the path segment.
+      required: [version]
+      properties:
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+          description: The `version` the client loaded; mismatch on commit yields `409`.
+          example: 3
+    ProductStockEntry:
+      type: object
+      description: Per-size stock row at create time.
+      required: [quantity]
+      properties:
+        quantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Initial on-hand quantity; `0` allowed.
+          example: 25
+        lowStockThreshold:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+          description: Low-stock when `quantity <= lowStockThreshold`; `null` opts out.
+          example: 5
     ProductPage:
       type: object
       description: Paged envelope returned by `GET /api/products`. `page` and `pageSize` echo the request; `totalElements` and `totalPages` describe the full filtered set.

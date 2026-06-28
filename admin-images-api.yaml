@@ -1,0 +1,81 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Admin Images API
+  description: Admin-only image upload for product and category artwork.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Admin Images
+    description: Admin image upload. Requires the `ADMIN` role.
+
+security:
+  - cookieAuth: []
+
+paths:
+  /api/admin/images/{resourceType}:
+    post:
+      operationId: uploadAdminImage
+      tags: [Admin Images]
+      summary: Upload an image (admin)
+      description: Stores an image and returns its absolute URL.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: resourceType
+          in: path
+          required: true
+          description: Target resource for the image. Must be `products` or `categories`.
+          schema:
+            type: string
+          example: products
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image file (max 12 MB). `products` accepts JPEG/PNG/WebP/AVIF; `categories` accepts SVG.
+      responses:
+        "200":
+          description: Image stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadResponse"
+        "400":
+          description: Validation failed (missing/empty file, disallowed extension, mime mismatch, corrupt or unsafe file).
+        "413":
+          description: File exceeds the 12 MB size cap.
+        "415":
+          description: Body is not `multipart/form-data`. `code = UNSUPPORTED_MEDIA_TYPE`.
+
+components:
+  schemas:
+    ImageUploadResponse:
+      type: object
+      required: [url]
+      description: Successful upload result.
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Absolute URL of the stored image; treat as opaque.
+          example: http://localhost:8080/images/products/d3ad12c4-1234-4abc-8def-0123456789ab.jpg
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: HttpOnly Secure SameSite=Lax JWT.
