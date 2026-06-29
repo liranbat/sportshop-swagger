@@ -2,11 +2,11 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Checkout API
-  description: Checkout API. `POST /api/checkout` runs the atomic cart-to-order transaction.
+  description: Checkout API. `POST /checkout` runs the atomic cart-to-order transaction.
   version: 0.1.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -17,7 +17,7 @@ security:
   - cookieAuth: []
 
 paths:
-  /api/checkout:
+  /checkout:
     post:
       operationId: checkout
       tags: [Checkout]
@@ -141,7 +141,7 @@ components:
 
     CheckoutRequest:
       type: object
-      description: Body for `POST /api/checkout`.
+      description: Body for `POST /checkout`.
       required: [shipping, payment]
       properties:
         shipping:
@@ -151,7 +151,7 @@ components:
 
     CheckoutResult:
       type: object
-      description: Committed order summary returned by `POST /api/checkout`.
+      description: Committed order summary returned by `POST /checkout`.
       required: [orderNumber, itemCount, totalPrice]
       properties:
         orderNumber:

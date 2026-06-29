@@ -6,7 +6,7 @@ info:
   version: 0.1.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -17,7 +17,7 @@ security:
   - cookieAuth: []
 
 paths:
-  /api/cart:
+  /cart:
     get:
       operationId: getCart
       tags: [Cart]
@@ -31,7 +31,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CartView"
 
-  /api/cart/count:
+  /cart/count:
     get:
       operationId: getCartCount
       tags: [Cart]
@@ -45,12 +45,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/CartCount"
 
-  /api/cart/sync:
+  /cart/sync:
     post:
       operationId: syncCart
       tags: [Cart]
       summary: Acknowledge product updates and return the cart
-      description: Bumps every line's `productVersionInCart` to the current `products.version` and returns the full `CartView`. User-driven only -- triggered by the Refresh button on the cart header and the modal's "Update Cart" action. Passive reads (page mount, post-mutation refetches) use `GET /api/cart` instead.
+      description: Bumps every line's `productVersionInCart` to the current `products.version` and returns the full `CartView`. User-driven only -- triggered by the Refresh button on the cart header and the modal's "Update Cart" action. Passive reads (page mount, post-mutation refetches) use `GET /cart` instead.
       responses:
         "200":
           description: Cart after version acknowledgment (may be empty).
@@ -59,7 +59,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CartView"
 
-  /api/cart/validate:
+  /cart/validate:
     post:
       operationId: validateCart
       tags: [Cart]
@@ -69,7 +69,7 @@ paths:
         case: version drift (price / name / image / description / category / threshold bumps),
         archive, insufficient stock, out of stock, size removed, and `is_multi_size` flipped.
         Does NOT mutate -- the user sees what changed in the Cart Issues Modal and
-        acknowledges via `POST /api/cart/sync` ("Update Cart").
+        acknowledges via `POST /cart/sync` ("Update Cart").
       responses:
         "200":
           description: Validation result; `ok` is `true` iff both issue arrays are empty.
@@ -78,7 +78,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CartValidationResult"
 
-  /api/cart/items:
+  /cart/items:
     post:
       operationId: addCartItem
       tags: [Cart]
@@ -86,7 +86,7 @@ paths:
       description: |
         Upserts on `(userId, productId, size)`. Quantity is **additive**; server caps via
         `LEAST(existing + requested, availableStock)` and sets `productVersionInCart` to
-        current. Does NOT return the cart -- the Navbar badge updates via a `GET /api/cart/count`
+        current. Does NOT return the cart -- the Navbar badge updates via a `GET /cart/count`
         refetch; full row state is fetched on the next page load / refresh button click.
       requestBody:
         required: true
@@ -98,7 +98,7 @@ paths:
         "204":
           description: Line added (or merged into an existing line).
 
-  /api/cart/items/{productId}/{size}:
+  /cart/items/{productId}/{size}:
     patch:
       operationId: updateCartItem
       tags: [Cart]
@@ -106,9 +106,9 @@ paths:
       description: |
         Sets the line's quantity to `quantity` (not additive). Touches `quantity` ONLY --
         does not refresh row details (name / price / image / stock / version) and does not
-        return the cart. The frontend refetches via `GET /api/cart` to pick up fresh row
-        state without re-acknowledging product versions; `POST /api/cart/sync` (refresh
-        button) and `POST /api/cart/validate` (checkout) remain the explicit version paths.
+        return the cart. The frontend refetches via `GET /cart` to pick up fresh row
+        state without re-acknowledging product versions; `POST /cart/sync` (refresh
+        button) and `POST /cart/validate` (checkout) remain the explicit version paths.
       parameters:
         - $ref: "#/components/parameters/ProductIdPath"
         - $ref: "#/components/parameters/SizePath"
@@ -383,7 +383,7 @@ components:
 
     AddCartItemRequest:
       type: object
-      description: Body for `POST /api/cart/items`. `quantity` is additive against any existing `(userId, productId, size)` line.
+      description: Body for `POST /cart/items`. `quantity` is additive against any existing `(userId, productId, size)` line.
       required: [productId, size, quantity]
       properties:
         productId:
@@ -405,7 +405,7 @@ components:
 
     UpdateCartItemRequest:
       type: object
-      description: Body for `PATCH /api/cart/items/{productId}/{size}`. Sets quantity to the given value (not additive).
+      description: Body for `PATCH /cart/items/{productId}/{size}`. Sets quantity to the given value (not additive).
       required: [quantity]
       properties:
         quantity:

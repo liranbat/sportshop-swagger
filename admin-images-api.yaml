@@ -6,7 +6,7 @@ info:
   version: 0.1.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -17,7 +17,7 @@ security:
   - cookieAuth: []
 
 paths:
-  /api/admin/images/{resourceType}:
+  /admin/images/{resourceType}:
     post:
       operationId: uploadAdminImage
       tags: [Admin Images]

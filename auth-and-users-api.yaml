@@ -6,7 +6,7 @@ info:
   version: 0.1.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -20,7 +20,7 @@ tags:
     description: Admin operations on refresh-token sessions -- list active, revoke single, revoke all for a user.
 
 paths:
-  /api/auth/register:
+  /auth/register:
     post:
       operationId: register
       tags: [Auth]
@@ -41,7 +41,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/auth/login:
+  /auth/login:
     post:
       operationId: login
       tags: [Auth]
@@ -67,7 +67,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/auth/logout:
+  /auth/logout:
     post:
       operationId: logout
       tags: [Auth]
@@ -83,7 +83,7 @@ paths:
               schema:
                 type: string
 
-  /api/auth/refresh:
+  /auth/refresh:
     post:
       operationId: refresh
       tags: [Auth]
@@ -104,7 +104,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/auth/me:
+  /auth/me:
     get:
       operationId: getMe
       tags: [Auth]
@@ -120,7 +120,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/users/me:
+  /users/me:
     patch:
       operationId: updateProfile
       tags: [Users]
@@ -166,7 +166,7 @@ paths:
               schema:
                 type: string
 
-  /api/users/me/password:
+  /users/me/password:
     post:
       operationId: changePassword
       tags: [Users]
@@ -184,7 +184,7 @@ paths:
         "204":
           description: Password updated.
 
-  /api/admin/users:
+  /admin/users:
     get:
       operationId: listAdminUsers
       tags: [Admin Users]
@@ -257,7 +257,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserListPage"
 
-  /api/admin/users/{id}:
+  /admin/users/{id}:
     get:
       operationId: getAdminUserById
       tags: [Admin Users]
@@ -314,7 +314,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/admin/users/{id}/promote:
+  /admin/users/{id}/promote:
     put:
       operationId: promoteAdminUser
       tags: [Admin Users]
@@ -343,7 +343,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/admin/users/{id}/demote:
+  /admin/users/{id}/demote:
     put:
       operationId: demoteAdminUser
       tags: [Admin Users]
@@ -372,7 +372,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/admin/users/{id}/soft-delete:
+  /admin/users/{id}/soft-delete:
     post:
       operationId: softDeleteAdminUser
       tags: [Admin Users]
@@ -401,7 +401,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/admin/users/{id}/restore:
+  /admin/users/{id}/restore:
     post:
       operationId: restoreAdminUser
       tags: [Admin Users]
@@ -430,7 +430,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
 
-  /api/admin/sessions:
+  /admin/sessions:
     get:
       operationId: listAdminSessions
       tags: [Admin Sessions]
@@ -517,7 +517,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SessionRevokeAllResponse"
 
-  /api/admin/sessions/{sessionId}:
+  /admin/sessions/{sessionId}:
     delete:
       operationId: revokeAdminSession
       tags: [Admin Sessions]
@@ -731,7 +731,7 @@ components:
         id:
           type: integer
           format: int64
-          description: refresh_tokens row id; the target of `DELETE /api/admin/sessions/{sessionId}`.
+          description: refresh_tokens row id; the target of `DELETE /admin/sessions/{sessionId}`.
           example: 42
         userId:
           type: integer
@@ -781,7 +781,7 @@ components:
 
     SessionRevokeAllResponse:
       type: object
-      description: Response body of `DELETE /api/admin/sessions?scope=others`.
+      description: Response body of `DELETE /admin/sessions?scope=others`.
       required: [affectedRowCount]
       properties:
         affectedRowCount:
