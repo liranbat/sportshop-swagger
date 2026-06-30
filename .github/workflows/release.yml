@@ -2,7 +2,7 @@ name: Release swagger specs
 
 on:
   push:
-    branches: [main, feature-ci]
+    branches: [main]
   workflow_dispatch:
 
 # Tags + Releases need contents:write. Nothing else.
@@ -21,7 +21,7 @@ jobs:
   # version so parallel streams don't collide on tag names.
   release:
     name: Package & release
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature-ci'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
