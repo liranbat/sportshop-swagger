@@ -1,0 +1,91 @@
+name: Release swagger specs
+
+on:
+  push:
+    branches: [main, feature-ci]
+  workflow_dispatch:
+
+# Tags + Releases need contents:write. Nothing else.
+permissions:
+  contents: write
+
+# Don't let two pushes to main race each other on the publish step.
+# In-flight publishes complete; the next one waits its turn.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Package + publish. Creates the git tag AND the GitHub Release
+  # atomically via `gh release create`. The branch is encoded in the
+  # version so parallel streams don't collide on tag names.
+  release:
+    name: Package & release
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature-ci'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      asset: ${{ steps.version.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version
+        id: version
+        run: |
+          # Format: {branch}.1.0.{run_number} — e.g. main.1.0.5
+          BRANCH="${{ github.ref_name }}"
+          VERSION="${BRANCH}.1.0.${{ github.run_number }}"
+          ASSET="sportshop-swagger-${VERSION}.zip"
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+          echo "Releasing version: $VERSION"
+
+      - name: Zip specs
+        run: |
+          set -euo pipefail
+          # Package every YAML at the repo root. -j flattens paths so files
+          # land at the zip root, ready to drop into target/openapi/.
+          # Bash globs don't recurse, so subdir YAMLs (e.g. workflow files
+          # under .github/) are intentionally excluded.
+          shopt -s nullglob
+          specs=( *.yaml *.yml )
+          if [ ${#specs[@]} -eq 0 ]; then
+            echo "::error::No YAML specs found at repo root"
+            exit 1
+          fi
+          echo "Packaging ${#specs[@]} spec(s): ${specs[*]}"
+          zip -j "${{ steps.version.outputs.asset }}" "${specs[@]}"
+          echo "Zip contents:"
+          unzip -l "${{ steps.version.outputs.asset }}"
+
+      - name: Create GitHub Release (tags the commit)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.value }}"
+          ASSET="${{ steps.version.outputs.asset }}"
+          # Tag name = version exactly (no `v` prefix). Format: {branch}.1.0.{run_number}.
+          gh release create "$VERSION" "$ASSET" \
+            --title "sportshop-swagger $VERSION" \
+            --target "${{ github.sha }}" \
+            --generate-notes
+
+      - name: Job summary
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          ASSET="${{ steps.version.outputs.asset }}"
+          REPO="${{ github.repository }}"
+          {
+            echo "## Released sportshop-swagger ${VERSION}"
+            echo ""
+            echo "**Tag:** \`${VERSION}\` on commit \`${{ github.sha }}\`"
+            echo ""
+            echo "**Download URL (anonymous, public):**"
+            echo ""
+            echo "\`\`\`"
+            echo "https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+            echo "\`\`\`"
+            echo ""
+            echo "**Consume from sportshop-backend:** bump \`<sportshop-swagger.version>\` in \`pom.xml\` to \`${VERSION}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
