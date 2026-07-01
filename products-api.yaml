@@ -6,7 +6,7 @@ info:
   version: 0.6.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -16,7 +16,7 @@ tags:
     description: Admin list of products (includes archived)
 
 paths:
-  /api/products:
+  /products:
     get:
       operationId: listProducts
       tags: [Products]
@@ -42,7 +42,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductPage"
 
-  /api/products/{id}:
+  /products/{id}:
     get:
       operationId: getProduct
       tags: [Products]
@@ -70,7 +70,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductDetail"
 
-  /api/admin/products:
+  /admin/products:
     get:
       operationId: listAdminProducts
       tags: [Admin Products]
@@ -124,7 +124,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductDetail"
 
-  /api/admin/products/{id}:
+  /admin/products/{id}:
     put:
       operationId: updateAdminProduct
       tags: [Admin Products]
@@ -154,7 +154,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductDetail"
 
-  /api/admin/products/{id}/archive:
+  /admin/products/{id}/archive:
     post:
       operationId: archiveAdminProduct
       tags: [Admin Products]
@@ -183,7 +183,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductDetail"
 
-  /api/admin/products/{id}/restore:
+  /admin/products/{id}/restore:
     post:
       operationId: restoreAdminProduct
       tags: [Admin Products]
@@ -393,10 +393,10 @@ components:
         isArchived:
           type: boolean
           description: |
-            `true` when the product has been archived. Hidden from non-admin surfaces — `/api/products`
-            (list) excludes archived rows, and `/api/products/{id}` (detail) returns `404` for archived
+            `true` when the product has been archived. Hidden from non-admin surfaces — `/products`
+            (list) excludes archived rows, and `/products/{id}` (detail) returns `404` for archived
             products when the caller is not an admin. Admins see archived products via
-            `/api/admin/products` and via the same `/api/products/{id}` path.
+            `/admin/products` and via the same `/products/{id}` path.
           example: false
         updatedAt:
           type: string
@@ -433,7 +433,7 @@ components:
       description: |
         Aggregated payload for the Product Details page. Wraps a `Product` with
         the resolved `categoryName` (saves the frontend a second call to
-        `/api/categories`) and the per-size stock breakdown.
+        `/categories`) and the per-size stock breakdown.
       allOf:
         - $ref: "#/components/schemas/Product"
         - type: object
@@ -478,7 +478,7 @@ components:
           example: IN_STOCK
     ProductCreateRequest:
       type: object
-      description: Request body for `POST /api/admin/products`.
+      description: Request body for `POST /admin/products`.
       required: [name, categoryId, isMultiSize, price, stockBySize]
       properties:
         name:
@@ -508,7 +508,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          description: Absolute URL from `POST /admin/images/products`. `null` leaves no image.
           example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
         price:
           type: number
@@ -527,7 +527,7 @@ components:
               lowStockThreshold: 5
     ProductUpdateRequest:
       type: object
-      description: Body for `PUT /api/admin/products/{id}`. Stock cascade on `isMultiSize` flip is described on the endpoint.
+      description: Body for `PUT /admin/products/{id}`. Stock cascade on `isMultiSize` flip is described on the endpoint.
       required: [name, categoryId, isMultiSize, price, version]
       properties:
         name:
@@ -557,7 +557,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL from `POST /api/admin/images/products`. `null` leaves no image.
+          description: Absolute URL from `POST /admin/images/products`. `null` leaves no image.
           example: http://localhost:8080/images/products/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.jpg
         price:
           type: number
@@ -603,7 +603,7 @@ components:
           example: 5
     ProductPage:
       type: object
-      description: Paged envelope returned by `GET /api/products`. `page` and `pageSize` echo the request; `totalElements` and `totalPages` describe the full filtered set.
+      description: Paged envelope returned by `GET /products`. `page` and `pageSize` echo the request; `totalElements` and `totalPages` describe the full filtered set.
       required: [items, page, pageSize, totalElements, totalPages]
       properties:
         items:

@@ -2,11 +2,11 @@ openapi: 3.0.3
 
 info:
   title: Sportshop Orders API
-  description: Read the caller's order history, read a single order's detail, and cancel a PAID order. Every user-facing endpoint is scoped to the authenticated caller; non-owner reads return `404`. Admin operations live under `/api/admin/orders/*` and require the `ADMIN` role -- list any user's orders (with customer search), read any order's detail (with customer info), cancel from `{PAID, SHIPPED, DELIVERED}`, transition status within the fulfillment trio (and one-way to `DONE`), and edit the shipping address with optimistic concurrency anchored on `updated_at`.
+  description: Read the caller's order history, read a single order's detail, and cancel a PAID order. Every user-facing endpoint is scoped to the authenticated caller; non-owner reads return `404`. Admin operations live under `/admin/orders/*` and require the `ADMIN` role -- list any user's orders (with customer search), read any order's detail (with customer info), cancel from `{PAID, SHIPPED, DELIVERED}`, transition status within the fulfillment trio (and one-way to `DONE`), and edit the shipping address with optimistic concurrency anchored on `updated_at`.
   version: 0.1.0
 
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8080/api
     description: Local development
 
 tags:
@@ -19,7 +19,7 @@ security:
   - cookieAuth: []
 
 paths:
-  /api/orders:
+  /orders:
     get:
       operationId: listOrders
       tags: [Orders]
@@ -44,7 +44,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderListPage"
 
-  /api/orders/{orderNumber}:
+  /orders/{orderNumber}:
     get:
       operationId: getOrder
       tags: [Orders]
@@ -60,13 +60,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderDetail"
 
-  /api/orders/{orderNumber}/cancel:
+  /orders/{orderNumber}/cancel:
     post:
       operationId: cancelOrder
       tags: [Orders]
       summary: Cancel a PAID order
       description: |
-        Cancels a `PAID` order owned by the caller. Atomically flips the order to `CANCELLED_BY_USER`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/orders/{orderNumber}` to render the new state.
+        Cancels a `PAID` order owned by the caller. Atomically flips the order to `CANCELLED_BY_USER`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /orders/{orderNumber}` to render the new state.
 
         Responses:
           * `204` -- order cancelled.
@@ -78,7 +78,7 @@ paths:
         "204":
           description: Order cancelled. Empty body.
 
-  /api/admin/orders:
+  /admin/orders:
     get:
       operationId: listAdminOrders
       tags: [Admin Orders]
@@ -106,7 +106,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderListPage"
 
-  /api/admin/orders/{orderNumber}:
+  /admin/orders/{orderNumber}:
     get:
       operationId: getAdminOrder
       tags: [Admin Orders]
@@ -124,13 +124,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderDetail"
 
-  /api/admin/orders/{orderNumber}/cancel:
+  /admin/orders/{orderNumber}/cancel:
     post:
       operationId: cancelAdminOrder
       tags: [Admin Orders]
       summary: Cancel any order (admin)
       description: |
-        Cancels any order in `{PAID, SHIPPED, DELIVERED}` regardless of owning user. Atomically flips the order to `CANCELLED_BY_ADMIN`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}` to render the new state.
+        Cancels any order in `{PAID, SHIPPED, DELIVERED}` regardless of owning user. Atomically flips the order to `CANCELLED_BY_ADMIN`, restores stock for every line, and marks the payment `REFUNDED`. Empty body; caller refetches `GET /admin/orders/{orderNumber}` to render the new state.
 
         Attribution: the acting admin is recorded on `updated_by` / `updated_at` and on `cancelled_by`; the `status` value (`CANCELLED_BY_ADMIN` vs. `CANCELLED_BY_USER`) is what distinguishes the initiator.
 
@@ -146,13 +146,13 @@ paths:
         "204":
           description: Order cancelled. Empty body.
 
-  /api/admin/orders/{orderNumber}/update-status:
+  /admin/orders/{orderNumber}/update-status:
     post:
       operationId: updateAdminOrderStatus
       tags: [Admin Orders]
       summary: Change an order's fulfillment status (admin)
       description: |
-        Atomically moves an order along the lifecycle state machine: `PAID` ↔ `SHIPPED` ↔ `DELIVERED`, plus the skip `PAID` ↔ `DELIVERED` and one-way `→ DONE` from any of `PAID` / `SHIPPED` / `DELIVERED`. No transitions out of `DONE` / `CANCELLED_*`, no self-loops. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+        Atomically moves an order along the lifecycle state machine: `PAID` ↔ `SHIPPED` ↔ `DELIVERED`, plus the skip `PAID` ↔ `DELIVERED` and one-way `→ DONE` from any of `PAID` / `SHIPPED` / `DELIVERED`. No transitions out of `DONE` / `CANCELLED_*`, no self-loops. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /admin/orders/{orderNumber}`.
 
         Attribution: the acting admin is recorded on `updated_by` / `updated_at`.
 
@@ -175,13 +175,13 @@ paths:
         "204":
           description: Status updated. Empty body.
 
-  /api/admin/orders/{orderNumber}/update-shipping:
+  /admin/orders/{orderNumber}/update-shipping:
     post:
       operationId: updateAdminOrderShipping
       tags: [Admin Orders]
       summary: Edit an order's shipping address (admin)
       description: |
-        Replaces the shipping address on an order whose status is one of `{PAID, SHIPPED, DELIVERED}`. All six `shipping` fields are required and validated against the same rules as checkout. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /api/admin/orders/{orderNumber}`.
+        Replaces the shipping address on an order whose status is one of `{PAID, SHIPPED, DELIVERED}`. All six `shipping` fields are required and validated against the same rules as checkout. `priorStatus` is the optimistic-concurrency anchor; the SQL UPDATE matches `WHERE status = :priorStatus`. Empty body; caller refetches `GET /admin/orders/{orderNumber}`.
 
         Attribution: the acting admin is recorded on `updated_by` / `updated_at`. `cancelled_by` / `cancelled_at` are untouched.
 
@@ -358,7 +358,7 @@ components:
 
     UpdateOrderStatusRequest:
       type: object
-      description: Body for `POST /api/admin/orders/{orderNumber}/update-status`. `priorStatus` is the status the client observed when opening the modal and is used as the optimistic-concurrency anchor.
+      description: Body for `POST /admin/orders/{orderNumber}/update-status`. `priorStatus` is the status the client observed when opening the modal and is used as the optimistic-concurrency anchor.
       required: [targetStatus, priorStatus]
       properties:
         targetStatus:
@@ -368,7 +368,7 @@ components:
 
     UpdateShippingAddressRequest:
       type: object
-      description: Body for `POST /api/admin/orders/{orderNumber}/update-shipping`. `shipping` carries the full replacement address (all six fields required, same validation as checkout). `priorStatus` is the status the client observed when opening the form and is used as the optimistic-concurrency anchor.
+      description: Body for `POST /admin/orders/{orderNumber}/update-shipping`. `shipping` carries the full replacement address (all six fields required, same validation as checkout). `priorStatus` is the status the client observed when opening the form and is used as the optimistic-concurrency anchor.
       required: [shipping, priorStatus]
       properties:
         shipping:
@@ -416,7 +416,7 @@ components:
 
     OrderListPage:
       type: object
-      description: Paged envelope returned by `GET /api/orders`.
+      description: Paged envelope returned by `GET /orders`.
       required: [items, page, pageSize, totalElements, totalPages]
       properties:
         items:
