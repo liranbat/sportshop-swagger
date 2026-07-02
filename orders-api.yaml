@@ -210,7 +210,6 @@ components:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT.
 
   parameters:
     OrderNumberPath:
@@ -497,7 +496,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute product image URL captured at order time; treat as opaque. `null` when no image was attached.
+          description: Absolute product image URL captured at order time. `null` when no image was attached.
           example: http://localhost:8080/images/products/basketball-spalding.jpg
         size:
           type: string

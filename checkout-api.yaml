@@ -23,10 +23,8 @@ paths:
       tags: [Checkout]
       summary: Convert the caller's cart into an order
       description: |
-        Runs the atomic checkout transaction: re-runs the pre-flight cart validation, deducts
-        stock, persists the `orders` / `order_items` / `payments` rows, and clears the cart.
-        Returns `CheckoutResult` on success. Any failure surfaces as the global `ApiError`
-        envelope with the appropriate HTTP status.
+        Atomic checkout: re-runs cart validation, deducts stock, persists the order and
+        payment, and clears the cart.
       requestBody:
         required: true
         content:
@@ -47,7 +45,6 @@ components:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
 
   schemas:
     ShippingDetails:

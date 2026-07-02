@@ -199,7 +199,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL of the category icon; treat as opaque. `null` if no icon uploaded.
+          description: Absolute URL of the category icon. `null` if no icon uploaded.
           example: http://localhost:8080/images/categories/soccer.svg
         isDeleted:
           type: boolean
@@ -248,9 +248,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: |
-            Absolute icon URL produced by `POST /admin/images/categories`. `null` clears the icon.
-            The server validates the URL prefix and stores the trailing filename only.
+          description: Absolute icon URL produced by `POST /admin/images/categories`. `null` clears the icon.
           example: http://localhost:8080/images/categories/3d6f6c1a-4f15-4e60-9a3a-4b8b6c8c1a2e.svg
 
     CategorySoftDeleteRequest:

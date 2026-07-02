@@ -52,12 +52,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ImageUploadResponse"
-        "400":
-          description: Validation failed (missing/empty file, disallowed extension, mime mismatch, corrupt or unsafe file).
-        "413":
-          description: File exceeds the 12 MB size cap.
-        "415":
-          description: Body is not `multipart/form-data`. `code = UNSUPPORTED_MEDIA_TYPE`.
 
 components:
   schemas:
@@ -70,7 +64,7 @@ components:
           type: string
           minLength: 1
           maxLength: 500
-          description: Absolute URL of the stored image; treat as opaque.
+          description: Absolute URL of the stored image.
           example: http://localhost:8080/images/products/d3ad12c4-1234-4abc-8def-0123456789ab.jpg
 
   securitySchemes:
@@ -78,4 +72,3 @@ components:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT.

@@ -65,11 +65,8 @@ paths:
       tags: [Cart]
       summary: Validate the cart for checkout
       description: |
-        Comprehensive read-only conflict report covering every user-visible checkout-blocking
-        case: version drift (price / name / image / description / category / threshold bumps),
-        archive, insufficient stock, out of stock, size removed, and `is_multi_size` flipped.
-        Does NOT mutate -- the user sees what changed in the Cart Issues Modal and
-        acknowledges via `POST /cart/sync` ("Update Cart").
+        Read-only conflict report: version drift, archive, insufficient/out-of-stock,
+        size removed, and multi-size flag flips. Client acknowledges via `POST /cart/sync`.
       responses:
         "200":
           description: Validation result; `ok` is `true` iff both issue arrays are empty.
@@ -84,10 +81,8 @@ paths:
       tags: [Cart]
       summary: Add a product / size to the cart
       description: |
-        Upserts on `(userId, productId, size)`. Quantity is **additive**; server caps via
-        `LEAST(existing + requested, availableStock)` and sets `productVersionInCart` to
-        current. Does NOT return the cart -- the Navbar badge updates via a `GET /cart/count`
-        refetch; full row state is fetched on the next page load / refresh button click.
+        Upserts on `(userId, productId, size)`. Quantity is **additive**; server caps at
+        `availableStock` and sets `productVersionInCart` to current.
       requestBody:
         required: true
         content:
@@ -104,11 +99,8 @@ paths:
       tags: [Cart]
       summary: Change a cart line's quantity
       description: |
-        Sets the line's quantity to `quantity` (not additive). Touches `quantity` ONLY --
-        does not refresh row details (name / price / image / stock / version) and does not
-        return the cart. The frontend refetches via `GET /cart` to pick up fresh row
-        state without re-acknowledging product versions; `POST /cart/sync` (refresh
-        button) and `POST /cart/validate` (checkout) remain the explicit version paths.
+        Replaces the line's quantity (**not additive**); does not bump `productVersionInCart`
+        or refresh other row details. Reconcile via `POST /cart/sync` or `POST /cart/validate`.
       parameters:
         - $ref: "#/components/parameters/ProductIdPath"
         - $ref: "#/components/parameters/SizePath"
@@ -143,7 +135,6 @@ components:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT (carries user id + role claim).
 
   parameters:
     ProductIdPath:
@@ -191,7 +182,7 @@ components:
 
     CartItem:
       type: object
-      description: One cart line. Identity is the composite `(productId, size)` -- no surrogate id.
+      description: One cart line.
       required:
         - productId
         - size
@@ -229,7 +220,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL derived from live `products.image_url`; treat as opaque. `null` if no image.
+          description: Absolute URL derived from live `products.image_url`. `null` if no image.
           example: http://localhost:8080/images/products/basketball-spalding.jpg
         productPrice:
           type: number

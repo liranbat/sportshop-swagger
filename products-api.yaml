@@ -48,18 +48,10 @@ paths:
       tags: [Products]
       summary: Get product details
       description: |
-        Returns the full product detail payload used by the Product Details page:
-        the base `Product` fields, the resolved `categoryName`, and a `sizes`
-        array describing the product's stock for each size (with a server-computed
-        `state` of `IN_STOCK`, `LOW_STOCK`, or `OUT_OF_STOCK`).
-
-        Single-size SKUs (`isMultiSize = false`) return exactly one entry whose
-        `size` is `ONE_SIZE`. Multi-size SKUs return one entry per stocked size.
-
-        Archived products are returned only to admins (with `isArchived = true`)
-        so they can land on the admin detail page directly. Non-admin callers
-        (including anonymous) get `404` for archived products — same response
-        shape as a non-existent id.
+        Returns the base `Product` fields, the resolved `categoryName`, and a
+        `sizes` array with a `state` of `IN_STOCK` / `LOW_STOCK` / `OUT_OF_STOCK`
+        per stocked size. Archived products are returned only to admins;
+        non-admin callers get `404`.
       parameters:
         - $ref: "#/components/parameters/ProductIdPath"
       responses:
@@ -378,7 +370,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL of the product image; treat as opaque. `null` if no image uploaded.
+          description: Absolute URL of the product image. `null` if no image uploaded.
           example: http://localhost:8080/images/products/basketball-spalding.jpg
         price:
           type: number

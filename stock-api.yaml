@@ -297,7 +297,7 @@ components:
           type: string
           maxLength: 500
           nullable: true
-          description: Absolute URL; treat as opaque. `null` if no image uploaded.
+          description: Absolute URL. `null` if no image uploaded.
           example: http://localhost:8080/images/products/nike-ja-3.jpg
         productIsArchived:
           type: boolean

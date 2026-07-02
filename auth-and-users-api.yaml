@@ -59,7 +59,7 @@ paths:
           description: Signed in.
           headers:
             Set-Cookie:
-              description: Sets `access_token` and `refresh_token` cookies (HttpOnly Secure SameSite=Lax).
+              description: Sets `access_token` and `refresh_token` cookies.
               schema:
                 type: string
           content:
@@ -96,7 +96,7 @@ paths:
           description: Refreshed.
           headers:
             Set-Cookie:
-              description: New `access_token` and rotated `refresh_token` cookies (HttpOnly Secure SameSite=Lax).
+              description: New `access_token` and rotated `refresh_token` cookies.
               schema:
                 type: string
           content:
@@ -146,14 +146,14 @@ paths:
       operationId: deleteAccount
       tags: [Users]
       summary: Soft-delete caller's account
-      description: Re-auth via `X-Confirm-Password` header (verified against the bcrypt hash before any mutation). Soft-deletes the user, hard-deletes refresh tokens and cart items, clears both cookies. Orders are preserved; email stays reserved. Server must keep this header out of access logs.
+      description: Verifies current password. Soft-deletes the user, hard-deletes refresh tokens and cart items, clears both cookies. Orders are preserved; email stays reserved.
       security:
         - cookieAuth: []
       parameters:
         - name: X-Confirm-Password
           in: header
           required: true
-          description: Caller's current password. Never logged.
+          description: Caller's current password.
           schema:
             type: string
             minLength: 1
@@ -203,14 +203,14 @@ paths:
         - name: status
           in: query
           required: false
-          description: Filter by deletion state. Absent = no status filter (both active and soft-deleted users are returned).
+          description: Filter by deletion state. Absent = no status filter.
           schema:
             $ref: "#/components/schemas/UserStatusFilter"
           example: ACTIVE
         - name: q
           in: query
           required: false
-          description: Case-insensitive substring match against `firstName`, `lastName`, `email`, `phone`, and the concatenated `firstName lastName` / `lastName firstName`, so a query like `Liran Batson` finds the user. Trimmed; empty after trim is ignored.
+          description: Case-insensitive substring match against `firstName`, `lastName`, `email`, `phone`, and the concatenated `firstName lastName` / `lastName firstName`.
           schema:
             type: string
             maxLength: 200
@@ -548,12 +548,10 @@ components:
       type: apiKey
       in: cookie
       name: access_token
-      description: HttpOnly Secure SameSite=Lax JWT.
     refreshCookieAuth:
       type: apiKey
       in: cookie
       name: refresh_token
-      description: HttpOnly Secure SameSite=Lax opaque token. Only `/auth/refresh` consumes it.
 
   schemas:
     RegisterRequest:
