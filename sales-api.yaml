@@ -1,0 +1,212 @@
+openapi: 3.0.3
+
+info:
+  title: Sportshop Sales API
+  description: Admin sales dashboard aggregates under `/admin/sales/*`.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local development
+
+tags:
+  - name: Admin Sales
+    description: Sales KPIs, status breakdown, and top products. Requires `ADMIN`.
+
+security:
+  - cookieAuth: []
+
+paths:
+  /admin/sales/summary:
+    get:
+      operationId: getAdminSalesSummary
+      tags: [Admin Sales]
+      summary: Sales summary for a date range
+      description: |
+        Inclusive UTC range `[dateFrom, dateTo]`; max span is server-configured.
+        Revenue / AOV / items / top products exclude cancelled orders;
+        cancelled status revenue is always 0.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: dateFrom
+          in: query
+          required: true
+          description: Inclusive start (`YYYY-MM-DD`).
+          schema:
+            type: string
+            format: date
+          example: "2026-04-01"
+        - name: dateTo
+          in: query
+          required: true
+          description: Inclusive end (`YYYY-MM-DD`); span limited by server config.
+          schema:
+            type: string
+            format: date
+          example: "2026-04-30"
+        - $ref: "#/components/parameters/TopProductsSortBy"
+      responses:
+        "200":
+          description: Aggregates for the range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesSummary"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+
+  parameters:
+    TopProductsSortBy:
+      name: topProductsSortBy
+      in: query
+      required: false
+      description: Rank top products by line revenue or quantity sold. When omitted the server sorts by `revenue`.
+      schema:
+        type: string
+        enum: [revenue, quantity]
+      example: revenue
+
+  schemas:
+    OrderStatus:
+      type: string
+      description: Order lifecycle status.
+      enum:
+        - PAID
+        - CANCELLED_BY_USER
+        - CANCELLED_BY_ADMIN
+        - SHIPPED
+        - DELIVERED
+        - DONE
+      example: PAID
+
+    SalesPeriodStats:
+      type: object
+      description: KPI totals for the range.
+      required:
+        - orderCount
+        - revenue
+        - cancelledCount
+        - cancelRate
+        - averageOrderValue
+        - itemsSoldAmount
+      properties:
+        orderCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Non-cancelled order count.
+          example: 48
+        revenue:
+          type: number
+          minimum: 0
+          description: Non-cancelled revenue sum.
+          example: 12340.50
+        cancelledCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Cancelled order count.
+          example: 3
+        cancelRate:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Cancel percent 0-100 (one decimal).
+          example: 5.9
+        averageOrderValue:
+          type: number
+          minimum: 0
+          description: revenue / orderCount (0 if none).
+          example: 257.09
+        itemsSoldAmount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Non-cancelled item quantity sum.
+          example: 112
+
+    SalesStatusStats:
+      type: object
+      description: One status breakdown row.
+      required: [status, orderCount, revenue]
+      properties:
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        orderCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Orders in this status.
+          example: 12
+        revenue:
+          type: number
+          minimum: 0
+          description: Revenue for this status (0 if cancelled).
+          example: 3200.00
+
+    SalesTopProductStats:
+      type: object
+      description: Top product row; `result` is the metric named by `topProductsSortBy`.
+      required: [productId, productName, result]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 42
+        productName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Current product name.
+          example: Trail Runner Pro
+        productImageUrl:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Absolute URL derived from live `products.image_filename`. `null` if no image.
+          example: http://localhost:8080/images/products/basketball-spalding.jpg
+        result:
+          type: number
+          minimum: 0
+          description: Line revenue sum when sorting by `revenue`, quantity sold when sorting by `quantity`.
+          example: 2159.82
+
+    SalesSummary:
+      type: object
+      description: Sales dashboard payload.
+      required: [dateFrom, dateTo, topProductsSortBy, summary, statusBreakdown, topProducts]
+      properties:
+        dateFrom:
+          type: string
+          format: date
+          description: Echo of dateFrom.
+          example: "2026-04-01"
+        dateTo:
+          type: string
+          format: date
+          description: Echo of dateTo.
+          example: "2026-04-30"
+        topProductsSortBy:
+          type: string
+          enum: [revenue, quantity]
+          description: Resolved sort mode; tells the client what `topProducts[].result` means.
+          example: revenue
+        summary:
+          $ref: "#/components/schemas/SalesPeriodStats"
+        statusBreakdown:
+          type: array
+          description: Per-status rows (zeros may be omitted).
+          items:
+            $ref: "#/components/schemas/SalesStatusStats"
+        topProducts:
+          type: array
+          description: Top products ranked by `topProductsSortBy`, best first (server-configured limit).
+          items:
+            $ref: "#/components/schemas/SalesTopProductStats"
